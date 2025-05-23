@@ -1,9 +1,9 @@
 from litellm import completion
 from pydantic import BaseModel
+# import json
 
-
-class JournalAnalyzer(BaseModel):
-    journal_entry: str
+# class JournalAnalyzer(BaseModel):
+#     journal_entry: str
     
     
 def journal_tool(entry: str) -> str:
@@ -20,5 +20,7 @@ def journal_tool(entry: str) -> str:
         {"role": "user", "content": f"Journal Entry:\n{entry}"}
     ]
     
-    response = completion(model="gemini/gemini-2.0-flash", messages=messages, temperature=0.0, response_format=JournalAnalyzer)
-    return response["choices"][0]["message"]["content"].get("journal_entry", "").strip()
+    response = completion(model="gemini/gemini-2.0-flash", messages=messages, temperature=0.0)
+    response = response["choices"][0]["message"]["content"]
+    return response
+    

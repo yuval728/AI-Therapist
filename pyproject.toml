@@ -9,4 +9,7 @@ dependencies = [
     "langchain-community>=0.3.24",
     "langgraph>=0.4.5",
     "litellm>=1.70.2",
+    "sentence-transformers>=4.1.0",
+    "langchain-huggingface>=0.2.0",
+    "chromadb>=1.0.10",
 ]
