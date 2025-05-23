@@ -1,6 +1,6 @@
 from litellm import completion
 from pydantic import BaseModel
-
+import json
 
 class EmotionAnalyzer(BaseModel):
     emotion: str
@@ -16,4 +16,7 @@ def emotion_tool(text: str) -> str:
     ]
 
     response = completion(model="gemini/gemini-2.0-flash-lite", messages=messages, temperature=0.0, response_format=EmotionAnalyzer)
-    return response["choices"][0]["message"]["content"].get("emotion", "").strip().lower()
+    response = response["choices"][0]["message"]["content"]
+    response = json.loads(response)
+    
+    return response.get("emotion", "").strip().lower()

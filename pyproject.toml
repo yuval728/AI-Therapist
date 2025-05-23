@@ -5,7 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "langchain>=0.3.25",
+    "langchain[google-genai]>=0.3.25",
     "langchain-community>=0.3.24",
     "langgraph>=0.4.5",
     "litellm>=1.70.2",
