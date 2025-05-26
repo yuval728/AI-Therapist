@@ -2,7 +2,7 @@
 # from langgraph.store.memory import InMemoryStore
 from langchain_core.documents import Document
 from langchain_core.messages import BaseMessage
-from langchain_community.vectorstores import Chroma
+from langchain_community.vectorstores import Chroma, SupabaseVectorStore
 from langchain_huggingface import HuggingFaceEmbeddings
 # from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from typing import Dict, List
