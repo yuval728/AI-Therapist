@@ -1,15 +1,34 @@
-# from langgraph.checkpoint.memory import MemorySaver
-# from langgraph.store.memory import InMemoryStore
 from langchain_core.documents import Document
-from langchain_core.messages import BaseMessage
-from langchain_community.vectorstores import Chroma, SupabaseVectorStore
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_huggingface import HuggingFaceEmbeddings
 # from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from typing import Dict, List
+from supabase import create_client, Client
+from typing import Dict, List, Optional
 from memory.state import TherapyState
 from uuid import uuid4
 import datetime
+import os
+import dotenv
 
+dotenv.load_dotenv()
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("Supabase URL and Key must be set in environment variables.")
+
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Initialize vector store
+vector_store = SupabaseVectorStore(
+    client=supabase,
+    embedding=HuggingFaceEmbeddings(model_name="BAAI/bge-large-en-v1.5"),
+    table_name="documents",
+    query_name="match_documents",
+)
 
 # embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 embedding_model = HuggingFaceEmbeddings(
@@ -17,44 +36,74 @@ embedding_model = HuggingFaceEmbeddings(
     # model_kwargs={"device": "cuda:0"},
     cache_folder="./cache",
 )
-vector_store = Chroma(
-    persist_directory="./vector_store", embedding_function=embedding_model
-)
-
 
 # === SHORT-TERM MEMORY FUNCTIONS ===
 def append_to_memory(
     state: TherapyState, message: BaseMessage, role: str = "user"
 ) -> TherapyState:
     """Appends a new message to the short-term memory."""
+    
+    """Appends message to Supabase memory_logs."""
+    user_id = state["user_id"]
+    supabase.table("memory_logs").insert({
+        "user_id": user_id,
+        "role": role,
+        "content": message.content,
+        "timestamp": datetime.timezone.now(datetime.timezone.utc).isoformat(),
+        "emotion": state.get("emotion"),
+        "is_crisis": state.get("is_crisis"),
+        "mode": state.get("mode"),
+        "journal_entry": state.get("journal_entry"),
+        "attack": state.get("attack")
+    }).execute()
     state["messages"].append(message)
     return state
 
 
-def get_memory(state: TherapyState) -> List[BaseMessage]:
-    """Retrieves the current memory state."""
-    return state["messages"][-6:]  # Get the last 6 messages
 
+def get_memory(state: TherapyState, limit: int = 6) -> List[BaseMessage]:
+    """Retrieve last N messages from Supabase."""
+    user_id = state["user_id"]
+    response = (
+        supabase
+        .table("memory_logs")
+        .select("content, role")
+        .eq("user_id", user_id)
+        .order("timestamp", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    messages = []
+    for row in reversed(response.data):
+        role = row["role"]
+        content = row["content"]
+        if role == "user":
+            messages.append(HumanMessage(content=content))
+        else:
+            messages.append(AIMessage(content=content))
+    return messages
 
-# # === LONG-TERM MEMORY FUNCTIONS ===
-def save_to_long_term_memory(user_id: str, content: str, metadata: Dict = None):
-    """Saves a message or journal entry into vector memory."""
+def save_to_long_term_memory(user_id: str, content: str, metadata: Optional[Dict] = None):
+    """Save content and embedding to Supabase."""
     metadata = metadata or {}
     document = Document(
         page_content=content,
         metadata={
             "user_id": user_id,
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "timestamp": datetime.datetime.utcnow().isoformat(),
             "document_id": str(uuid4()),
-        },
+            **metadata
+        }
     )
     vector_store.add_documents([document])
-    # vector_store.persist()
-
 
 def search_long_term_memory(user_id: str, query: str, k: int = 3) -> List[Document]:
-    """Searches for relevant documents in vector memory."""
-    results = vector_store.similarity_search(query, k=k, filter={"user_id": user_id})
+    """Search relevant documents from Supabase vector store."""
+    results = vector_store.similarity_search(
+        query=query,
+        k=k,
+        filter={"user_id": user_id}
+    )
     for doc in results:
         print(f"[Memory Hit] {doc.page_content[:80]}... (metadata: {doc.metadata})")
     return results

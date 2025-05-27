@@ -12,4 +12,5 @@ dependencies = [
     "sentence-transformers>=4.1.0",
     "langchain-huggingface>=0.2.0",
     "chromadb>=1.0.10",
+    "supabase>=2.15.2",
 ]
