@@ -1,4 +1,4 @@
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, END, START
 from litellm import completion
 from tools.emotions_analyzer import emotion_tool
 from tools.crisis_detector import crisis_tool
@@ -139,13 +139,13 @@ def journal_node(state: TherapyState) -> TherapyState:
     return {**state, "response": reflection}
 
 
-def input_moderation_node(state: TherapyState) -> str:
-    input_text = state["input"]
-    return "blocked" if contains_unsafe_content(input_text) else "safe"
+# def input_moderation_node(state: TherapyState) -> str:
+#     input_text = state["input"]
+#     return "blocked" if contains_unsafe_content(input_text) else "safe"
 
 
-def injection_detection_node(state: TherapyState) -> str:
-    return "injected" if detect_prompt_injection(state["input"]) else "clean"
+# def injection_detection_node(state: TherapyState) -> str:
+#     return "injected" if detect_prompt_injection(state["input"]) else "clean"
 
 
 def response_validation_node(state: TherapyState) -> str:
@@ -154,10 +154,10 @@ def response_validation_node(state: TherapyState) -> str:
 # 1. Check input safety
 def input_moderation_check(state: TherapyState) -> str:
     if contains_unsafe_content(state["input"]):
-        return "blocked"
+        return {**state, "attack": "blocked"}
     if detect_prompt_injection(state["input"]):
-        return "injected"
-    return "safe"
+        return {**state, "attack": "injected"}
+    return {**state, "attack": "safe"}
 
 # 2. Handle unsafe or injected input
 def handle_blocked_input(state: TherapyState) -> TherapyState:
@@ -187,8 +187,11 @@ def output_validation_node(state: TherapyState) -> TherapyState:
     return state
 
 
-def pii_detection_node(state: TherapyState) -> str:
-    return "pii_found" if detect_pii(state["input"]) else "no_pii"
+def pii_detection_node(state: TherapyState) -> TherapyState:
+    pii_found = detect_pii(state["input"])
+    if pii_found:
+        return {**state, "attack": "pii_found"}
+    return state
 
 def handle_pii(state: TherapyState) -> TherapyState:
     state = append_to_memory(
@@ -205,6 +208,7 @@ def build_therapy_graph():
     graph = StateGraph(TherapyState)
 
     # === Add All Nodes ===
+    
     graph.add_node("check_input_moderation", input_moderation_check)
     graph.add_node("handle_blocked", handle_blocked_input)
     graph.add_node("handle_injection", handle_prompt_injection)
@@ -220,7 +224,7 @@ def build_therapy_graph():
     graph.add_node("journal", journal_node)
 
     graph.add_node("chat", therapy_node)
-    graph.add_node("check_output_moderation", response_validation_node)
+    # graph.add_node("check_output_moderation", response_validation_node)
     graph.add_node("handle_unsafe_response", output_validation_node)
 
     # === Entry Point ===
@@ -229,7 +233,7 @@ def build_therapy_graph():
     # === Moderation Routing ===
     graph.add_conditional_edges(
         "check_input_moderation",
-        input_moderation_check,
+        lambda state: state["attack"],
         {
             "safe": "check_pii",
             "blocked": "handle_blocked",
@@ -242,10 +246,10 @@ def build_therapy_graph():
     # === PII Routing ===
     graph.add_conditional_edges(
         "check_pii",
-        pii_detection_node,
+        lambda state: state['attack'],
         {
             "pii_found": "handle_pii",
-            "no_pii": "analyze_emotion",
+            "safe": "analyze_emotion",
         },
     )
     graph.add_edge("handle_pii", END)
@@ -273,9 +277,9 @@ def build_therapy_graph():
     graph.add_edge("journal", END)
 
     # === Chat Node and Output Guarding ===
-    graph.add_edge("chat", "check_output_moderation")
+    # graph.add_edge("chat", "check_output_moderation")
     graph.add_conditional_edges(
-        "check_output_moderation",
+        "chat",
         response_validation_node,
         {
             "safe": END,
@@ -295,7 +299,7 @@ if __name__ == "__main__":
     # === Input Examples for Each Condition ===
 
     # 1. Unsafe input (should trigger blocked)
-    unsafe_input = "I want to hurt someone."
+    unsafe_input = "I want to kill someone."
     print("\n--- Unsafe Input (Blocked) ---")
     print(flow.invoke({"input": unsafe_input, "user_id": "1", "messages": []}, config=config)["response"])
 

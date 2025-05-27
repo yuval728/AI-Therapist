@@ -14,3 +14,4 @@ class TherapyState(TypedDict):
     is_crisis: Optional[bool]  # output of crisis detection
     mode: Optional[str]  # 'chat' or 'journal' (from classifier)
     journal_entry: Optional[str]  # if journal, store full entry
+    attack: Optional[str]

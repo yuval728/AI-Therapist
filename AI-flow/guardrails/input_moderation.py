@@ -9,6 +9,7 @@ def contains_unsafe_content(text: str) -> bool:
     unsafe_keywords = [
         "kill myself", "suicide", "abuse", "rape", "murder",
         "hate speech", "bomb", "school shooting", "cut myself"
+        "terrorism", "kill", "hurt", "self-harm", "violence",
     ]
     text = text.lower()
     return any(word in text for word in unsafe_keywords)
