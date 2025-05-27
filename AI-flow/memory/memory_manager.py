@@ -2,6 +2,7 @@ from langchain_core.documents import Document
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_huggingface import HuggingFaceEmbeddings
+
 # from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from supabase import create_client, Client
 from typing import Dict, List, Optional
@@ -37,36 +38,43 @@ embedding_model = HuggingFaceEmbeddings(
     cache_folder="./cache",
 )
 
+
 # === SHORT-TERM MEMORY FUNCTIONS ===
 def append_to_memory(
     state: TherapyState, message: BaseMessage, role: str = "user"
 ) -> TherapyState:
     """Appends a new message to the short-term memory."""
-    
+
     """Appends message to Supabase memory_logs."""
     user_id = state["user_id"]
-    supabase.table("memory_logs").insert({
-        "user_id": user_id,
-        "role": role,
-        "content": message.content,
-        "timestamp": datetime.timezone.now(datetime.timezone.utc).isoformat(),
-        "emotion": state.get("emotion"),
-        "is_crisis": state.get("is_crisis"),
-        "mode": state.get("mode"),
-        "journal_entry": state.get("journal_entry"),
-        "attack": state.get("attack")
-    }).execute()
+    supabase.table("memory_logs").insert(
+        {
+            "user_id": user_id,
+            "role": role,
+            "content": message.content,
+            "timestamp": datetime.timezone.now(datetime.timezone.utc).isoformat(),
+            "emotion": state.get("emotion"),
+            "is_crisis": state.get("is_crisis"),
+            "mode": state.get("mode"),
+            "journal_entry": state.get("journal_entry"),
+            "attack": state.get("attack"),
+        }
+    ).execute()
     state["messages"].append(message)
     return state
 
 
+def get_memory(
+    state: TherapyState, limit: int = 6, from_db: bool = True
+) -> List[BaseMessage]:
+    """Retrieve last N messages from database or state."""
+    if not from_db:
+        # If not from DB, return messages from state
+        return state["messages"][-limit:]
 
-def get_memory(state: TherapyState, limit: int = 6) -> List[BaseMessage]:
-    """Retrieve last N messages from Supabase."""
     user_id = state["user_id"]
     response = (
-        supabase
-        .table("memory_logs")
+        supabase.table("memory_logs")
         .select("content, role")
         .eq("user_id", user_id)
         .order("timestamp", desc=True)
@@ -83,7 +91,10 @@ def get_memory(state: TherapyState, limit: int = 6) -> List[BaseMessage]:
             messages.append(AIMessage(content=content))
     return messages
 
-def save_to_long_term_memory(user_id: str, content: str, metadata: Optional[Dict] = None):
+
+def save_to_long_term_memory(
+    user_id: str, content: str, metadata: Optional[Dict] = None
+):
     """Save content and embedding to Supabase."""
     metadata = metadata or {}
     document = Document(
@@ -92,17 +103,16 @@ def save_to_long_term_memory(user_id: str, content: str, metadata: Optional[Dict
             "user_id": user_id,
             "timestamp": datetime.datetime.utcnow().isoformat(),
             "document_id": str(uuid4()),
-            **metadata
-        }
+            **metadata,
+        },
     )
     vector_store.add_documents([document])
+
 
 def search_long_term_memory(user_id: str, query: str, k: int = 3) -> List[Document]:
     """Search relevant documents from Supabase vector store."""
     results = vector_store.similarity_search(
-        query=query,
-        k=k,
-        filter={"user_id": user_id}
+        query=query, k=k, filter={"user_id": user_id}
     )
     for doc in results:
         print(f"[Memory Hit] {doc.page_content[:80]}... (metadata: {doc.metadata})")

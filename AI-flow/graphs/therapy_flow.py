@@ -1,4 +1,4 @@
-from langgraph.graph import StateGraph, END, START
+from langgraph.graph import StateGraph, END
 from litellm import completion
 from tools.emotions_analyzer import emotion_tool
 from tools.crisis_detector import crisis_tool
@@ -17,12 +17,11 @@ from memory.memory_manager import (
     save_to_long_term_memory,
     search_long_term_memory,
 )
-import os
 
 
 def therapy_node(state: TherapyState) -> TherapyState:
     user_input = state["input"]
-    history = get_memory(state)
+    history = get_memory(state, from_db=False)
     memory_msgs = [
         {
             "role": "user" if isinstance(m, HumanMessage) else "assistant",
