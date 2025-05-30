@@ -1,23 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from models.models import SignInRequest, SignUpRequest, OAuthRequest, User
 from services.auth_services import SupabaseAuthService, get_current_user
 
 router = APIRouter()
 
-class SignInRequest(BaseModel):
-    email: str
-    password: str
-
-class SignUpRequest(BaseModel):
-    email: str
-    password: str
-
-class OAuthRequest(BaseModel):
-    provider: str  # "google", "github", etc.
-
-class User(BaseModel):
-    id: str
-    email: str
 
 @router.post("/signup", response_model=User)
 async def sign_up(data: SignUpRequest):

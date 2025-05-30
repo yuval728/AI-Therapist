@@ -6,7 +6,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 # from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from supabase import create_client, Client
 from typing import Dict, List, Optional
-from memory.state import TherapyState
+from AIFlow.memory.state import TherapyState
 from uuid import uuid4
 import datetime
 import os
@@ -26,16 +26,9 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # Initialize vector store
 vector_store = SupabaseVectorStore(
     client=supabase,
-    embedding=HuggingFaceEmbeddings(model_name="BAAI/bge-large-en-v1.5"),
+    embedding=HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2"),
     table_name="documents",
     query_name="match_documents",
-)
-
-# embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-embedding_model = HuggingFaceEmbeddings(
-    model_name="BAAI/bge-large-en-v1.5",
-    # model_kwargs={"device": "cuda:0"},
-    cache_folder="./cache",
 )
 
 

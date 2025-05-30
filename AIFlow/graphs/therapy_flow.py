@@ -1,17 +1,17 @@
 from langgraph.graph import StateGraph, END
 from litellm import completion
-from tools.emotions_analyzer import emotion_tool
-from tools.crisis_detector import crisis_tool
-from tools.journal_tool import journal_tool
-from memory.state import TherapyState
-from guardrails.input_moderation import (
+from AIFlow.tools.emotions_analyzer import emotion_tool
+from AIFlow.tools.crisis_detector import crisis_tool
+from AIFlow.tools.journal_tool import journal_tool
+from AIFlow.memory.state import TherapyState
+from AIFlow.guardrails.input_moderation import (
     contains_dangerous_response,
     contains_unsafe_content,
     detect_prompt_injection,
 )
-from guardrails.pii_detection import detect_pii
+from AIFlow.guardrails.pii_detection import detect_pii
 from langchain_core.messages import HumanMessage, AIMessage
-from memory.memory_manager import (
+from AIFlow.memory.memory_manager import (
     append_to_memory,
     get_memory,
     save_to_long_term_memory,
