@@ -15,7 +15,7 @@ if not SUPABASE_URL:
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 if not SUPABASE_KEY:
     raise ValueError("SUPABASE_KEY environment variable not set")
-SUPABASE_REDIRECT_URL = os.getenv("SUPABASE_REDIRECT_URL", "https://yourfrontend.com/oauth/callback")
+SUPABASE_REDIRECT_URL = os.getenv("SUPABASE_REDIRECT_URL", "http://localhost:5173/oauth/callback")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 security = HTTPBearer()
@@ -48,6 +48,7 @@ class SupabaseAuthService:
 
     @staticmethod
     def get_oauth_url(provider: str) -> str:
+        print(provider)
         # Construct redirect URL for OAuth sign-in (adjust redirect URL to your frontend)
         redirect_uri = urllib.parse.quote(SUPABASE_REDIRECT_URL, safe="")
         return f"{SUPABASE_URL}/auth/v1/authorize?provider={provider}&redirect_to={redirect_uri}"

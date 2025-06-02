@@ -2,7 +2,7 @@
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export async function signUp(email: string, password: string) {
-  const res = await fetch(`${API_URL}/signup`, {
+  const res = await fetch(`${API_URL}/auth/signup`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
@@ -12,7 +12,7 @@ export async function signUp(email: string, password: string) {
 }
 
 export async function signIn(email: string, password: string) {
-  const res = await fetch(`${API_URL}/signin`, {
+  const res = await fetch(`${API_URL}/auth/signin`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
@@ -22,7 +22,7 @@ export async function signIn(email: string, password: string) {
 }
 
 export async function getMe(token: string) {
-  const res = await fetch(`${API_URL}/me`, {
+  const res = await fetch(`${API_URL}/auth/me`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error("Invalid token");
@@ -30,7 +30,7 @@ export async function getMe(token: string) {
 }
 
 export async function getOAuthURL(provider: string): Promise<string> {
-  const res = await fetch(`${API_URL}/oauth`, {
+  const res = await fetch(`${API_URL}/auth/oauth`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ provider }),
