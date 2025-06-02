@@ -1,8 +1,10 @@
 # app/main.py
+import sys
+sys.path.append("..")
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import auth
-from websocket_routes import chat
+from backend.routes import auth
+from backend.websocket_routes import chat
 app = FastAPI()
 
 # Allow CORS (customize origin in production)
