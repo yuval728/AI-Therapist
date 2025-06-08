@@ -1,5 +1,5 @@
-from graphs.therapy_flow import build_therapy_graph
-from memory.memory_manager import get_memory
+from src.graphs.therapy_flow import build_therapy_graph
+from src.memory.memory_manager import get_memory
 
 def run_therapy_flow(user_id: str, user_input: str, thread_id: str = "default"):
     """Run the therapy flow for a user."""

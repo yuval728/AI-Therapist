@@ -28,7 +28,7 @@ create table if not exists documents (
   user_id uuid not null references auth.users(id) on delete cascade,
   content text not null,
   metadata jsonb,
-  embedding vector(1536)  -- Adjust dimension for your embedding model
+  embedding Vector  -- Adjust dimension for your embedding model
 );
 
 -- === RPC Function for Vector Search ===
