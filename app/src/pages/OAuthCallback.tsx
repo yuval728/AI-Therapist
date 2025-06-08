@@ -17,7 +17,10 @@ export default function OAuthCallback({ onAuth }: { onAuth: (token: string, emai
         localStorage.setItem("token", token);
         navigate("/");
       })
-      .catch(() => alert("OAuth verification failed"));
+      .catch(() => {
+        alert("OAuth verification failed");
+        localStorage.removeItem("token");
+      });
   }, []);
 
   return <div className="p-4">Signing you in...</div>;

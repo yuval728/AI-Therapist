@@ -11,6 +11,7 @@ export default function Login({ onAuth }: { onAuth: (access_token: string, email
     try {
       const res = isSignup ? await signUp(email, password) : await signIn(email, password);
       onAuth(res.access_token, res.email);
+      localStorage.setItem("token", res.access_token);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Auth error");
     }

@@ -89,6 +89,7 @@ def save_to_long_term_memory(
     """Save content and embedding to Supabase."""
     metadata = metadata or {}
     document = Document(
+        user_id=user_id,
         page_content=content,
         metadata={
             "user_id": user_id,
@@ -98,6 +99,33 @@ def save_to_long_term_memory(
         },
     )
     vector_store.add_documents([document])
+
+# def save_to_long_term_memory(user_id: str, content: str, metadata: Optional[Dict] = None):
+#     """Store both in Supabase DB and vector index with correct user_id."""
+#     metadata = metadata or {}
+
+#     # 1. Create metadata
+#     document_id = str(uuid4())
+#     timestamp = datetime.datetime.utcnow().isoformat()
+#     full_metadata = {
+#         "timestamp": timestamp,
+#         "document_id": document_id,
+#         **metadata
+#     }
+
+#     # 2. Insert metadata + user_id into Supabase manually
+#     insert_response = supabase.table("documents").insert({
+#         "user_id": user_id,
+#         "content": content,
+#         "metadata": full_metadata
+#     }).execute()
+
+#     if insert_response.error:
+#         raise Exception(f"Supabase insert failed: {insert_response.error}")
+
+#     # 3. Embed and push to SupabaseVectorStore
+#     doc = Document(page_content=content, metadata=full_metadata)
+#     vector_store.add_documents([doc])  # will match by metadata["document_id"]
 
 
 def search_long_term_memory(user_id: str, query: str, k: int = 3) -> List[Document]:

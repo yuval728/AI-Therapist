@@ -25,16 +25,16 @@ create table if not exists memory_logs (
 -- === Long-Term Memory with Vector Embeddings ===
 create table if not exists documents (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  -- user_id uuid not null references auth.users(id) on delete cascade,
   content text not null,
   metadata jsonb,
-  embedding Vector  -- Adjust dimension for your embedding model
+  embedding vector(384)  -- Adjust dimension for your embedding model
 );
 
 -- === RPC Function for Vector Search ===
 create or replace function match_documents (
   filter jsonb,
-  query_embedding vector
+  query_embedding vector(384)  -- Adjust dimension for your embedding model
 )
 returns table (
   id uuid,
