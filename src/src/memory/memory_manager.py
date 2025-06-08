@@ -6,7 +6,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 # from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from supabase import create_client, Client
 from typing import Dict, List, Optional
-from AIFlow.memory.state import TherapyState
+from src.memory.state import TherapyState
 from uuid import uuid4
 import datetime
 import os
