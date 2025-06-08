@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { signIn, signUp, getOAuthURL } from "../api";
 
-export default function Login({ onAuth }: { onAuth: (token: string, email: string) => void }) {
+export default function Login({ onAuth }: { onAuth: (access_token: string, email: string) => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSignup, setIsSignup] = useState(false);
@@ -24,6 +24,7 @@ export default function Login({ onAuth }: { onAuth: (token: string, email: strin
       alert("OAuth failed");
     }
   };
+  
 
   return (
     <div className="p-4 max-w-sm mx-auto space-y-4">

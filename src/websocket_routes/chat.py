@@ -1,7 +1,7 @@
 # app/api/websocket/chat.py
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from src.services.auth_services import SupabaseAuthService
-from src.services.graph_services import run_therapy_flow
+from services.auth_services import SupabaseAuthService
+from services.graph_services import run_therapy_flow
 
 router = APIRouter()
 

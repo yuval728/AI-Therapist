@@ -1,7 +1,7 @@
 from supabase import create_client, Client
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from src.models.models import User
+from src.models.auth_models import User
 import jwt
 import os
 import urllib.parse

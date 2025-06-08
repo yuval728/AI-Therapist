@@ -1,10 +1,8 @@
-# app/main.py
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.routes import auth
-from src.websocket_routes import chat
+from routes import auth
+from websocket_routes import chat
 
 app = FastAPI()
 

@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import Login from "./pages/Login";
 import ChatBox from "./components/ChatBox";
+import ChatPage from "./pages/Chat";
 import OAuthCallback from "./pages/OAuthCallback";
 import { getMe } from "./api";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
@@ -31,7 +32,8 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={token ? <ChatBox token={token} /> : <Login onAuth={handleAuth} />} />
+        <Route path="/" element={token ? <ChatPage /> : <Login onAuth={handleAuth} />} />
+        
         <Route path="/oauth/callback" element={<OAuthCallback onAuth={handleAuth} />} />
       </Routes>
     </BrowserRouter>

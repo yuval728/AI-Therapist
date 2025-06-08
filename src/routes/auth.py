@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from models.models import SignInRequest, SignUpRequest, OAuthRequest, User
+from src.models.auth_models import SignInRequest, SignUpRequest, OAuthRequest, User
 from services.auth_services import SupabaseAuthService, get_current_user
 
 router = APIRouter()
