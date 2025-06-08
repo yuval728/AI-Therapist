@@ -45,7 +45,7 @@ def append_to_memory(
             "user_id": user_id,
             "role": role,
             "content": message.content,
-            "timestamp": datetime.timezone.now(datetime.timezone.utc).isoformat(),
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "emotion": state.get("emotion"),
             "is_crisis": state.get("is_crisis"),
             "mode": state.get("mode"),

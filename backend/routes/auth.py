@@ -20,7 +20,7 @@ async def sign_in(data: SignInRequest):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     return user
 
-@router.post("/oauth", response_model=User)
+@router.post("/oauth", response_model=dict)
 async def oauth_login(data: OAuthRequest):
     # This will just return a redirect URL to the provider's login page
     url = SupabaseAuthService.get_oauth_url(data.provider)

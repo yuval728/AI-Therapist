@@ -3,7 +3,7 @@ sys.path.append("..")  # Adjust the path as necessary to import AIFlow modules
 from AIFlow.graphs.therapy_flow import build_therapy_graph
 from AIFlow.memory.memory_manager import get_memory
 
-async def run_therapy_flow(user_id: str, user_input: str, thread_id: str = "default"):
+def run_therapy_flow(user_id: str, user_input: str, thread_id: str = "default"):
     """Run the therapy flow for a user."""
     # Initialize the therapy graph
     therapy_graph = build_therapy_graph()
@@ -25,7 +25,6 @@ async def run_therapy_flow(user_id: str, user_input: str, thread_id: str = "defa
     }
 
     # Run the graph with the initial state
-    final_state = await therapy_graph.run(initial_state, thread_id=thread_id)
+    final_state =  therapy_graph.invoke(initial_state, config={"configurable": {"thread_id": "1"}})
 
     return final_state
-    

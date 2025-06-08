@@ -33,9 +33,8 @@ create table if not exists documents (
 
 -- === RPC Function for Vector Search ===
 create or replace function match_documents (
-  query_embedding vector(1536),
-  match_count int,
-  user_id uuid
+  filter jsonb,
+  query_embedding vector
 )
 returns table (
   id uuid,
@@ -43,15 +42,15 @@ returns table (
   metadata jsonb,
   similarity float
 )
-language sql
+language sql stable
 as $$
   select
-    documents.id,
-    documents.content,
-    documents.metadata,
-    1 - (documents.embedding <=> query_embedding) as similarity
+    id,
+    content,
+    metadata,
+    1 - (embedding <#> query_embedding) as similarity
   from documents
-  where documents.user_id = match_documents.user_id
-  order by documents.embedding <=> query_embedding
-  limit match_count;
+  where metadata->>'user_id' = user_id::text
+  order by embedding <#> query_embedding
+  limit 3;
 $$;

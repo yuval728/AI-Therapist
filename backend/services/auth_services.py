@@ -48,8 +48,7 @@ class SupabaseAuthService:
 
     @staticmethod
     def get_oauth_url(provider: str) -> str:
-        print(provider)
-        # Construct redirect URL for OAuth sign-in (adjust redirect URL to your frontend)
+
         redirect_uri = urllib.parse.quote(SUPABASE_REDIRECT_URL, safe="")
         return f"{SUPABASE_URL}/auth/v1/authorize?provider={provider}&redirect_to={redirect_uri}"
 
