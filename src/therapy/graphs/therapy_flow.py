@@ -1,6 +1,5 @@
 from langgraph.graph import StateGraph, END
-from src.therapy.tools.emotions_analyzer import emotion_tool
-from src.therapy.tools.crisis_detector import crisis_tool
+from src.therapy.tools import emotion_tool, crisis_tool
 from src.core import chat_completion
 from src.models import TherapyState
 from langchain_core.messages import HumanMessage, AIMessage

@@ -243,7 +243,7 @@ class JournalHandler:
     @timing_decorator("journal_processing")
     async def process_journal_entry(state: Dict[str, Any]) -> Dict[str, Any]:
         """Process journal entry and return reflection with enhanced monitoring."""
-        from src.therapy.tools.journal_tool import journal_tool
+        from src.therapy.tools import journal_tool
         
         user_id = state.get("user_id")
         session_id = state.get("session_id")
