@@ -2,9 +2,10 @@ from supabase import create_client, Client
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from src.models.auth_models import User
+from src.utils.error_handling import handle_auth_error, AuthenticationError
 import jwt
 import urllib.parse
-from src.config import get_settings
+from src.config.config import get_settings
 from loguru import logger
 
 _settings = get_settings()

@@ -3,6 +3,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from supabase import create_client, Client
+from src.config.config import get_settings
 from typing import Dict, List, Optional
 from src.memory.state import TherapyState
 from uuid import uuid4

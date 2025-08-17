@@ -1,9 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routes import auth
-from .websocket_routes import chat
-from .config import get_settings
-from .logging_utils import configure_logging, log_event
+from .api.routes import auth
+from .api.websocket_routes import chat
+from .config.config import get_settings
+from .core.logging_utils import configure_logging, log_event
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from fastapi.responses import Response
 

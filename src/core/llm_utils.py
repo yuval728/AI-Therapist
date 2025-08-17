@@ -2,7 +2,7 @@ import anyio
 from typing import Callable, Any
 from litellm import completion
 from loguru import logger
-from src.config import get_settings
+from src.config.config import get_settings
 
 settings = get_settings()
 

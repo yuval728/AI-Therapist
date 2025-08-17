@@ -1,5 +1,5 @@
-from src.config import get_settings
-from src.llm_utils import async_completion
+from src.config.config import get_settings
+from src.core.llm_utils import async_completion
 settings = get_settings()
 # import json
 
