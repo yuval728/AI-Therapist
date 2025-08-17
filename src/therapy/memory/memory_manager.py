@@ -6,6 +6,7 @@ from supabase import create_client, Client
 from src.config import get_settings
 from src.models import TherapyState
 from src.utils import log_therapy_event, timing_decorator
+from src.database import get_supabase_client, supabase_session
 from typing import Dict, List, Optional, Tuple
 from uuid import uuid4
 import datetime
@@ -39,32 +40,15 @@ class MemoryManager:
     
     def __init__(self):
         self.settings = get_settings()
-        dotenv.load_dotenv()
-        
-        # Initialize Supabase client
-        supabase_url = os.getenv("SUPABASE_URL") or self.settings.database.supabase_url
-        supabase_key = os.getenv("SUPABASE_KEY") or self.settings.database.supabase_key
-        
-        if not supabase_url or not supabase_key:
-            raise ValueError("Supabase URL and Key must be configured.")
-        
-        self.supabase = create_client(supabase_url, supabase_key)
-        
-        # Initialize embeddings
-        google_api_key = os.getenv("GOOGLE_API_KEY")
-        if not google_api_key:
-            raise ValueError("GOOGLE_API_KEY must be set for embeddings.")
-        
-        self.embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-        self.vector_store = SupabaseVectorStore(
-            client=self.supabase,
-            embedding=self.embeddings,
-            table_name="documents",
-            query_name="match_documents",
-        )
-        
-        # Token encoding for pruning
+        self.supabase_client = None
         self._encoding = None
+        self._initialized = False
+    
+    async def _ensure_initialized(self):
+        """Ensure Supabase client is initialized."""
+        if not self._initialized:
+            self.supabase_client = await get_supabase_client()
+            self._initialized = True
     
     def _get_encoding(self):
         """Get token encoding for text processing."""
@@ -84,34 +68,42 @@ class MemoryManager:
         return len(self._get_encoding().encode(text))
     
     @timing_decorator("append_to_memory")
-    def append_to_memory(
+    async def append_to_memory(
         self, 
         state: TherapyState, 
         message: BaseMessage, 
         role: str = "user"
     ) -> TherapyState:
         """Enhanced memory append with monitoring and error handling."""
+        await self._ensure_initialized()
+        
         user_id = state["user_id"]
         session_id = state.get("session_id", "default")
         
         try:
-            # Insert to database with enhanced metadata
-            self.supabase.table("memory_logs").insert({
-                "user_id": user_id,
-                "session_id": session_id,
-                "role": role,
-                "content": message.content,
-                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "emotion": state.get("emotion"),
-                "emotion_confidence": state.get("emotion_confidence"),
-                "is_crisis": state.get("is_crisis"),
-                "crisis_level": state.get("crisis_level"),
-                "mode": state.get("mode"),
-                "journal_entry": state.get("journal_entry"),
-                "attack": state.get("attack"),
-                "message_length": len(message.content),
-                "token_count": self.count_tokens(message.content)
-            }).execute()
+            # Use enhanced Supabase client
+            from src.models import MessageType, EmotionType, CrisisLevel
+            
+            message_type = MessageType.USER_INPUT if role == "user" else MessageType.AI_RESPONSE
+            emotion = EmotionType(state.get("emotion")) if state.get("emotion") else None
+            crisis_level = CrisisLevel(state.get("crisis_level")) if state.get("crisis_level") else None
+            
+            result = await self.supabase_client.save_memory_log(
+                user_id=user_id,
+                session_id=session_id,
+                role=role,
+                content=message.content,
+                message_type=message_type,
+                emotion=emotion,
+                emotion_confidence=state.get("emotion_confidence"),
+                is_crisis=state.get("is_crisis", False),
+                crisis_level=crisis_level,
+                metadata={
+                    "mode": state.get("mode"),
+                    "journal_entry": state.get("journal_entry"),
+                    "attack": state.get("attack")
+                }
+            )
             
             # Add to state
             state["messages"].append(message)
@@ -123,7 +115,8 @@ class MemoryManager:
                 session_id=session_id,
                 role=role,
                 message_length=len(message.content),
-                total_messages=len(state["messages"])
+                total_messages=len(state["messages"]),
+                db_success=result.success
             )
             
             return state
@@ -141,7 +134,7 @@ class MemoryManager:
 
 
     @timing_decorator("get_memory")
-    def get_memory(
+    async def get_memory(
         self, 
         state: TherapyState, 
         limit: int = 6, 
@@ -163,30 +156,31 @@ class MemoryManager:
             return messages
 
         try:
-            response = (
-                self.supabase.table("memory_logs")
-                .select("content, role, timestamp, emotion, crisis_level")
-                .eq("user_id", user_id)
-                .order("timestamp", desc=True)
-                .limit(limit)
-                .execute()
+            await self._ensure_initialized()
+            
+            result = await self.supabase_client.get_memory_logs(
+                user_id=user_id,
+                session_id=session_id,
+                limit=limit
             )
             
             messages = []
-            for row in reversed(response.data):
-                role = row["role"]
-                content = row["content"]
-                if role == "user":
-                    messages.append(HumanMessage(content=content))
-                else:
-                    messages.append(AIMessage(content=content))
+            if result.success:
+                for row in reversed(result.data):
+                    role = row["role"]
+                    content = row["content"]
+                    if role == "user":
+                        messages.append(HumanMessage(content=content))
+                    else:
+                        messages.append(AIMessage(content=content))
             
             log_therapy_event(
                 event="memory_retrieved_from_db",
                 user_id=user_id,
                 session_id=session_id,
                 message_count=len(messages),
-                requested_limit=limit
+                requested_limit=limit,
+                db_success=result.success
             )
             
             return messages
@@ -202,38 +196,34 @@ class MemoryManager:
             return state["messages"][-limit:]
 
     @timing_decorator("save_long_term_memory")
-    def save_to_long_term_memory(
+    async def save_to_long_term_memory(
         self, 
         user_id: str, 
         content: str, 
         metadata: Optional[Dict] = None
     ) -> bool:
         """Enhanced long-term memory save with monitoring."""
-        metadata = metadata or {}
+        await self._ensure_initialized()
         
         try:
-            document = Document(
-                page_content=content,
-                metadata={
-                    "user_id": user_id,
-                    "timestamp": datetime.datetime.utcnow().isoformat(),
-                    "document_id": str(uuid4()),
-                    "content_length": len(content),
-                    "token_count": self.count_tokens(content),
-                    **metadata,
-                },
-            )
+            content_type = metadata.get("type", "memory") if metadata else "memory"
             
-            self.vector_store.add_documents([document])
+            success = await self.supabase_client.save_to_vector_store(
+                user_id=user_id,
+                content=content,
+                content_type=content_type,
+                metadata=metadata
+            )
             
             log_therapy_event(
                 event="long_term_memory_saved",
                 user_id=user_id,
                 content_length=len(content),
-                metadata_keys=list(metadata.keys())
+                content_type=content_type,
+                success=success
             )
             
-            return True
+            return success
             
         except Exception as e:
             log_therapy_event(
@@ -272,7 +262,7 @@ class MemoryManager:
 
 
     @timing_decorator("search_long_term_memory")
-    def search_long_term_memory(
+    async def search_long_term_memory(
         self, 
         user_id: str, 
         query: str, 
@@ -280,18 +270,23 @@ class MemoryManager:
         days_filter: int = 30
     ) -> MemorySearchResult:
         """Enhanced long-term memory search with monitoring."""
+        await self._ensure_initialized()
+        
         import time
         start_time = time.time()
         
         try:
-            results = self.vector_store.similarity_search(
-                query=query, 
-                k=k, 
-                filter={"user_id": user_id}
+            threshold = 0.7 if days_filter else 0.5
+            
+            results = await self.supabase_client.search_vector_store(
+                user_id=user_id,
+                query=query,
+                k=k,
+                threshold=threshold
             )
             
-            # Filter by recency if specified
-            if days_filter:
+            # Additional filtering by days if needed
+            if days_filter and results:
                 cutoff_date = datetime.datetime.utcnow() - datetime.timedelta(days=days_filter)
                 filtered_results = []
                 for doc in results:
@@ -447,27 +442,27 @@ _memory_manager = MemoryManager()
 
 
 # Backward compatibility functions
-def append_to_memory(state: TherapyState, message: BaseMessage, role: str = "user") -> TherapyState:
+async def append_to_memory(state: TherapyState, message: BaseMessage, role: str = "user") -> TherapyState:
     """Backward compatibility wrapper."""
-    return _memory_manager.append_to_memory(state, message, role)
+    return await _memory_manager.append_to_memory(state, message, role)
 
 
-def get_memory(state: TherapyState, limit: int = 6, from_db: bool = True) -> List[BaseMessage]:
+async def get_memory(state: TherapyState, limit: int = 6, from_db: bool = True) -> List[BaseMessage]:
     """Backward compatibility wrapper."""
-    return _memory_manager.get_memory(state, limit, from_db)
+    return await _memory_manager.get_memory(state, limit, from_db)
 
 
-def save_to_long_term_memory(user_id: str, content: str, metadata: Optional[Dict] = None) -> bool:
+async def save_to_long_term_memory(user_id: str, content: str, metadata: Optional[Dict] = None) -> bool:
     """Backward compatibility wrapper."""
-    return _memory_manager.save_to_long_term_memory(user_id, content, metadata)
+    return await _memory_manager.save_to_long_term_memory(user_id, content, metadata)
 
 
-def search_long_term_memory(user_id: str, query: str, k: int = 3) -> List[Document]:
+async def search_long_term_memory(user_id: str, query: str, k: int = 3) -> List[Document]:
     """Backward compatibility wrapper."""
-    result = _memory_manager.search_long_term_memory(user_id, query, k)
+    result = await _memory_manager.search_long_term_memory(user_id, query, k)
     return result.documents
 
 
-def prune_messages(state: TherapyState, max_tokens: int = 1200) -> TherapyState:
+async def prune_messages(state: TherapyState, max_tokens: int = 1200) -> TherapyState:
     """Backward compatibility wrapper."""
-    return _memory_manager.prune_messages(state, max_tokens)
+    return await _memory_manager.prune_messages(state, max_tokens)

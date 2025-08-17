@@ -8,14 +8,14 @@ from pydantic_settings import BaseSettings
 
 class DatabaseSettings(BaseSettings):
     """Database configuration settings."""
-    url: str = Field(..., env="SUPABASE_URL", description="Supabase database URL")
-    key: str = Field(..., env="SUPABASE_KEY", description="Supabase API key")
-    redirect_url: str = Field(
-        default="http://localhost:5173/oauth/callback",
-        env="SUPABASE_REDIRECT_URL"
-    )
-    max_connections: int = Field(default=20, env="DB_MAX_CONNECTIONS", ge=1, le=100)
-    connection_timeout: int = Field(default=30, env="DB_TIMEOUT", ge=5, le=300)
+    supabase_url: str = Field(..., env="SUPABASE_URL", description="Supabase project URL")
+    supabase_key: str = Field(..., env="SUPABASE_KEY", description="Supabase anon key")
+    supabase_service_role_key: Optional[str] = Field(default=None, env="SUPABASE_SERVICE_ROLE_KEY", description="Supabase service role key")
+    max_connections: int = Field(default=10, env="DB_MAX_CONNECTIONS", ge=1, le=100, description="Maximum database connections")
+    timeout: int = Field(default=30, env="DB_TIMEOUT", ge=5, le=300, description="Database timeout in seconds")
+    enable_rls: bool = Field(default=True, env="ENABLE_RLS", description="Enable Row Level Security")
+    vector_dimension: int = Field(default=768, env="VECTOR_DIMENSION", description="Vector embedding dimension")
+    similarity_threshold: float = Field(default=0.7, env="SIMILARITY_THRESHOLD", description="Vector similarity threshold")
 
 
 class AuthSettings(BaseSettings):
