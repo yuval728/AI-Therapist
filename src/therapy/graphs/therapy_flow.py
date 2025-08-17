@@ -1,8 +1,8 @@
 from langgraph.graph import StateGraph, END
 from src.therapy.tools.emotions_analyzer import emotion_tool
 from src.therapy.tools.crisis_detector import crisis_tool
-from src.core.llm_utils import async_completion
-from src.therapy.memory.state import TherapyState
+from src.core import chat_completion
+from src.models import TherapyState
 from langchain_core.messages import HumanMessage, AIMessage
 from src.therapy.memory.memory_manager import (
     append_to_memory,
@@ -10,7 +10,7 @@ from src.therapy.memory.memory_manager import (
     search_long_term_memory,
     prune_messages,
 )
-from src.config.config import get_settings
+from src.config import get_settings
 from src.config.constants import NodeNames, ClassificationResults, SystemPrompts, Limits
 from src.therapy.flow_handlers import (
     InputHandler,
@@ -19,77 +19,126 @@ from src.therapy.flow_handlers import (
     JournalHandler,
     SafetyHandler
 )
+from src.therapy.services.therapy_service import get_therapy_service
+from src.utils import log_therapy_event, timing_decorator
 
 settings = get_settings()
 
 
-class PromptBuilder:
-    """Centralizes prompt assembly to avoid duplication and manage context formatting."""
-    @staticmethod
-    def build(state, history, relevant_memories):
-        system_parts = [
-            SystemPrompts.THERAPIST_BASE,
-            f"User current emotion (heuristic): {state.get('emotion') or 'unknown'}.",
-            SystemPrompts.PROVIDE_SUPPORT,
-        ]
-        
-        if state.get("summary"):
-            system_parts.append(f"Earlier summary:\n{state['summary'][:Limits.SUMMARY_MAX_LENGTH]}")
-            
-        if relevant_memories:
-            system_parts.append("Relevant past context bullets:")
-            for mem in relevant_memories[:Limits.RELEVANT_MEMORIES_LIMIT]:
-                system_parts.append(f"- {mem[:Limits.MEMORY_CONTENT_MAX_LENGTH]}")
+# === Enhanced Node Functions ===
 
-        system_msg = {"role": "system", "content": "\n".join(system_parts)}
-        messages = [system_msg]
-        
-        # Add conversation history
+@timing_decorator("therapy_node")
+async def therapy_node(state: TherapyState) -> TherapyState:
+    """Enhanced therapy chat node using therapy service."""
+    user_id = state["user_id"]
+    session_id = state.get("session_id", "default")
+    user_input = state["input"]
+    
+    try:
+        # Prepare conversation history
+        state = prune_messages(state)
+        history = get_memory(state, from_db=False)
+        conversation_history = []
         for m in history:
             role = "user" if m.type == 'human' else 'assistant'
-            messages.append({"role": role, "content": m.content})
-            
-        # Add current user input
-        messages.append({"role": "user", "content": state["input"]})
-        return messages
+            conversation_history.append({"role": role, "content": m.content})
+        
+        # Get relevant memories
+        relevant_docs = search_long_term_memory(user_id, user_input)
+        relevant_memories = [doc.page_content for doc in relevant_docs]
+        
+        # Get session summary if available
+        session_summary = state.get("summary")
+        
+        # Use therapy service for comprehensive processing
+        therapy_service = get_therapy_service()
+        result = await therapy_service.process_therapy_input(
+            user_id=user_id,
+            session_id=session_id,
+            input_text=user_input,
+            conversation_history=conversation_history,
+            relevant_memories=relevant_memories,
+            session_summary=session_summary
+        )
+        
+        # Update memory
+        state = append_to_memory(state, HumanMessage(content=user_input), role="user")
+        state = append_to_memory(state, AIMessage(content=result["response"]), role="assistant")
+        
+        # Update state with analysis results
+        updated_state = {
+            **state,
+            "response": result["response"],
+            "emotion": result["emotion"],
+            "emotion_confidence": result["emotion_confidence"],
+            "is_crisis": result["is_crisis"],
+            "crisis_level": result["crisis_level"],
+            "relevant_memories": relevant_memories,
+        }
+        
+        return updated_state
+        
+    except Exception as e:
+        log_therapy_event(
+            event="therapy_node_failed",
+            user_id=user_id,
+            session_id=session_id,
+            error=str(e)
+        )
+        # Fallback response
+        fallback_response = "I'm here to support you. Could you tell me more about what's on your mind?"
+        state = append_to_memory(state, HumanMessage(content=user_input), role="user")
+        state = append_to_memory(state, AIMessage(content=fallback_response), role="assistant")
+        return {**state, "response": fallback_response}
 
-# === Simplified Node Functions ===
-
-async def therapy_node(state: TherapyState) -> TherapyState:
-    """Main therapy chat node: builds prompt, queries model, updates memory."""
-    user_input = state["input"]
-    state = prune_messages(state)
-    history = get_memory(state, from_db=False)
-    relevant_docs = search_long_term_memory(state["user_id"], user_input)
-    relevant_memories = [doc.page_content for doc in relevant_docs]
-    prompt = PromptBuilder.build(state, history, relevant_memories)
-    
-    response = await async_completion(
-        model=settings.model_chat, 
-        temperature=settings.temperature_chat, 
-        messages=prompt
-    )
-    ai_message = response["choices"][0]["message"]["content"]
-
-    state = append_to_memory(state, HumanMessage(content=user_input), role="user")
-    state = append_to_memory(state, AIMessage(content=ai_message), role="assistant")
-
-    return {
-        **state,
-        "response": ai_message,
-        "relevant_memories": relevant_memories,
-    }
-
+@timing_decorator("emotion_analysis")
 async def emotion_node(state: TherapyState) -> TherapyState:
-    """Detects emotion from user input."""
-    emotion = await emotion_tool(state["input"])
-    return {**state, "emotion": emotion}
+    """Enhanced emotion detection with monitoring."""
+    user_id = state["user_id"]
+    user_input = state["input"]
+    
+    try:
+        therapy_service = get_therapy_service()
+        emotion, confidence = await therapy_service.analyze_emotion(user_input, user_id)
+        
+        return {
+            **state, 
+            "emotion": emotion.value if emotion else None,
+            "emotion_confidence": confidence
+        }
+        
+    except Exception as e:
+        log_therapy_event(
+            event="emotion_node_failed",
+            user_id=user_id,
+            error=str(e)
+        )
+        return {**state, "emotion": None, "emotion_confidence": 0.0}
 
+@timing_decorator("crisis_detection")
 async def crisis_check_node_async(state: TherapyState) -> str:
-    """Check for crisis and return routing decision."""
-    is_crisis = await crisis_tool(state["input"])
-    state["is_crisis"] = is_crisis
-    return ClassificationResults.CRISIS if is_crisis else ClassificationResults.SAFE
+    """Enhanced crisis detection with monitoring."""
+    user_id = state["user_id"]
+    user_input = state["input"]
+    
+    try:
+        therapy_service = get_therapy_service()
+        is_crisis, crisis_level = await therapy_service.detect_crisis(user_input, user_id)
+        
+        # Update state with crisis information
+        state["is_crisis"] = is_crisis
+        state["crisis_level"] = crisis_level.value if crisis_level else None
+        
+        return ClassificationResults.CRISIS if is_crisis else ClassificationResults.SAFE
+        
+    except Exception as e:
+        log_therapy_event(
+            event="crisis_check_failed",
+            user_id=user_id,
+            error=str(e)
+        )
+        # Default to safe if detection fails
+        return ClassificationResults.SAFE
 
 # === Wrapper Functions for Handlers ===
 

@@ -1,23 +1,237 @@
-import anyio
-from typing import Callable, Any
+"""Enhanced LLM utilities with comprehensive error handling and monitoring."""
+import asyncio
+import time
+from typing import Callable, Any, Dict, List, Optional, Union
+from dataclasses import dataclass
 from litellm import completion
-from loguru import logger
-from src.config.config import get_settings
+from src.config import get_settings
+from src.utils import (
+    log_performance_metric,
+    log_security_event,
+    timing_decorator,
+    retry_decorator,
+    ValidationError,
+    TherapyError
+)
 
 settings = get_settings()
 
-async def run_completion_safely(func: Callable[..., Any], *args, **kwargs) -> Any:
-	"""Run blocking LiteLLM completion in a thread with basic retry."""
-	retries = 2
-	delay = 0.5
-	for attempt in range(retries + 1):
-		try:
-			return await anyio.to_thread.run_sync(lambda: func(*args, **kwargs), cancellable=True)
-		except Exception as e:  # noqa
-			logger.warning(f"completion_error attempt={attempt} error={e}")
-			if attempt == retries:
-				raise
-			await anyio.sleep(delay * (attempt + 1))
 
-async def async_completion(**kwargs):
-	return await run_completion_safely(completion, **kwargs)
+@dataclass
+class CompletionRequest:
+    """Structured completion request with validation."""
+    model: str
+    messages: List[Dict[str, str]]
+    temperature: float = 0.7
+    max_tokens: Optional[int] = None
+    top_p: Optional[float] = None
+    frequency_penalty: Optional[float] = None
+    presence_penalty: Optional[float] = None
+    user_id: Optional[str] = None
+    
+    def __post_init__(self):
+        """Validate completion request parameters."""
+        if not self.model:
+            raise ValidationError("Model is required")
+        if not self.messages:
+            raise ValidationError("Messages are required")
+        if not (0.0 <= self.temperature <= 2.0):
+            raise ValidationError("Temperature must be between 0.0 and 2.0")
+        if self.max_tokens and self.max_tokens <= 0:
+            raise ValidationError("Max tokens must be positive")
+
+
+class LLMClient:
+    """Enhanced LLM client with monitoring and safety features."""
+    
+    def __init__(self):
+        self.settings = get_settings()
+        self._request_count = 0
+        self._total_tokens = 0
+    
+    @timing_decorator("llm_completion")
+    @retry_decorator(max_attempts=3, delay=1.0, backoff=2.0)
+    async def completion(
+        self,
+        request: Union[CompletionRequest, Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Execute LLM completion with comprehensive monitoring."""
+        # Convert dict to CompletionRequest if needed
+        if isinstance(request, dict):
+            request = CompletionRequest(**request)
+        
+        # Validate request
+        self._validate_request(request)
+        
+        # Log request
+        self._log_request(request)
+        
+        try:
+            # Execute completion
+            result = await self._execute_completion(request)
+            
+            # Log success metrics
+            self._log_success(request, result)
+            
+            return result
+            
+        except Exception as e:
+            # Log failure
+            self._log_failure(request, e)
+            raise TherapyError(f"LLM completion failed: {str(e)}")
+    
+    async def _execute_completion(self, request: CompletionRequest) -> Dict[str, Any]:
+        """Execute the actual completion request."""
+        completion_kwargs = {
+            "model": request.model,
+            "messages": request.messages,
+            "temperature": request.temperature,
+        }
+        
+        # Add optional parameters
+        if request.max_tokens:
+            completion_kwargs["max_tokens"] = request.max_tokens
+        if request.top_p:
+            completion_kwargs["top_p"] = request.top_p
+        if request.frequency_penalty:
+            completion_kwargs["frequency_penalty"] = request.frequency_penalty
+        if request.presence_penalty:
+            completion_kwargs["presence_penalty"] = request.presence_penalty
+        
+        # Execute in thread pool to avoid blocking
+        return await asyncio.to_thread(completion, **completion_kwargs)
+    
+    def _validate_request(self, request: CompletionRequest) -> None:
+        """Validate completion request for safety and compliance."""
+        # Check for potential prompt injection
+        for message in request.messages:
+            content = message.get("content", "")
+            if self._detect_prompt_injection(content):
+                log_security_event(
+                    event="prompt_injection_in_llm_request",
+                    attack_type="prompt_injection",
+                    user_id=request.user_id,
+                    severity="HIGH"
+                )
+                raise ValidationError("Potential prompt injection detected")
+        
+        # Check token limits
+        estimated_tokens = sum(len(msg.get("content", "").split()) 
+                             for msg in request.messages)
+        if estimated_tokens > self.settings.models.max_tokens_chat:
+            raise ValidationError(f"Request exceeds token limit: {estimated_tokens}")
+    
+    def _detect_prompt_injection(self, content: str) -> bool:
+        """Basic prompt injection detection."""
+        injection_patterns = [
+            "ignore previous instructions",
+            "disregard above",
+            "act as",
+            "simulate",
+            "pretend to be",
+            "jailbreak",
+            "you are now"
+        ]
+        content_lower = content.lower()
+        return any(pattern in content_lower for pattern in injection_patterns)
+    
+    def _log_request(self, request: CompletionRequest) -> None:
+        """Log completion request details."""
+        self._request_count += 1
+        log_performance_metric(
+            operation="llm_request_initiated",
+            duration_ms=0,
+            user_id=request.user_id,
+            model=request.model,
+            temperature=request.temperature,
+            message_count=len(request.messages)
+        )
+    
+    def _log_success(self, request: CompletionRequest, result: Dict[str, Any]) -> None:
+        """Log successful completion metrics."""
+        usage = result.get("usage", {})
+        tokens_used = usage.get("total_tokens", 0)
+        self._total_tokens += tokens_used
+        
+        log_performance_metric(
+            operation="llm_completion_success",
+            duration_ms=0,  # Duration handled by timing decorator
+            user_id=request.user_id,
+            model=request.model,
+            tokens_used=tokens_used,
+            prompt_tokens=usage.get("prompt_tokens", 0),
+            completion_tokens=usage.get("completion_tokens", 0)
+        )
+    
+    def _log_failure(self, request: CompletionRequest, error: Exception) -> None:
+        """Log completion failure."""
+        log_performance_metric(
+            operation="llm_completion_failure",
+            duration_ms=0,
+            success=False,
+            user_id=request.user_id,
+            model=request.model,
+            error=str(error)
+        )
+    
+    @property
+    def stats(self) -> Dict[str, Any]:
+        """Get client statistics."""
+        return {
+            "request_count": self._request_count,
+            "total_tokens": self._total_tokens
+        }
+
+
+# Global client instance
+_llm_client = LLMClient()
+
+
+async def async_completion(**kwargs) -> Dict[str, Any]:
+    """Convenient async completion function."""
+    return await _llm_client.completion(kwargs)
+
+
+async def chat_completion(
+    messages: List[Dict[str, str]],
+    model: Optional[str] = None,
+    temperature: Optional[float] = None,
+    user_id: Optional[str] = None,
+    **kwargs
+) -> str:
+    """Simplified chat completion that returns just the content."""
+    request = CompletionRequest(
+        model=model or settings.models.chat_model,
+        messages=messages,
+        temperature=temperature or settings.models.temperature_chat,
+        user_id=user_id,
+        **kwargs
+    )
+    
+    result = await _llm_client.completion(request)
+    return result["choices"][0]["message"]["content"]
+
+
+async def classify_text(
+    text: str,
+    system_prompt: str,
+    model: Optional[str] = None,
+    user_id: Optional[str] = None
+) -> str:
+    """Classify text using LLM with consistent formatting."""
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": text}
+    ]
+    
+    return await chat_completion(
+        messages=messages,
+        model=model or settings.models.light_model,
+        temperature=settings.models.temperature_classifiers,
+        user_id=user_id
+    )
+
+
+def get_llm_stats() -> Dict[str, Any]:
+    """Get LLM client statistics."""
+    return _llm_client.stats
