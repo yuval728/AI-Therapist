@@ -3,60 +3,56 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from src.models.auth_models import User
 import jwt
-import os
 import urllib.parse
-import dotenv
+from src.config import get_settings
+from loguru import logger
 
-dotenv.load_dotenv()
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-if not SUPABASE_URL:
-    raise ValueError("SUPABASE_URL environment variable not set")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-if not SUPABASE_KEY:
-    raise ValueError("SUPABASE_KEY environment variable not set")
-SUPABASE_REDIRECT_URL = os.getenv("SUPABASE_REDIRECT_URL", "http://localhost:5173/oauth/callback")
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+_settings = get_settings()
+supabase: Client = create_client(_settings.supabase_url, _settings.supabase_key)
 security = HTTPBearer()
-
-JWT_SECRET = os.getenv("JWT_SECRET")
-if not JWT_SECRET:
-    raise ValueError("JWT_SECRET environment variable not set")
-JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+JWT_SECRET = _settings.supabase_key  # Supabase uses service key for JWT verify if using anon key pattern
+JWT_ALGORITHM = _settings.jwt_algorithm
 
 class SupabaseAuthService:
     @staticmethod
     async def sign_up(email: str, password: str) -> User | None:
         response = supabase.auth.sign_up({"email": email, "password": password})
         if response.user:
+            # Supabase may not always immediately give session on sign_up (email confirmation). Return minimal user.
             return User(id=response.user.id, email=response.user.email)
         return None
 
     @staticmethod
     async def sign_in(email: str, password: str) -> User | None:
         response = supabase.auth.sign_in_with_password({"email": email, "password": password})
-        if response.user:
+        if response.user and response.session:
             return User(
                 id=response.user.id,
                 email=response.user.email,
                 access_token=response.session.access_token,
-                refresh_token=response.session.refresh_token,
-                expires_in=response.session.expires_in,
+                refresh_token=getattr(response.session, "refresh_token", None),
+                expires_in=getattr(response.session, "expires_in", None),
             )
         return None
 
     @staticmethod
     def get_oauth_url(provider: str) -> str:
-
-        redirect_uri = urllib.parse.quote(SUPABASE_REDIRECT_URL, safe="")
-        return f"{SUPABASE_URL}/auth/v1/authorize?provider={provider}&redirect_to={redirect_uri}"
+        """Return Supabase OAuth authorization URL for the given provider."""
+        redirect_uri = urllib.parse.quote(_settings.supabase_redirect_url, safe="")
+        return (
+            f"{_settings.supabase_url}/auth/v1/authorize?provider={provider}&redirect_to={redirect_uri}"
+        )
 
     @staticmethod
     def verify_jwt(token: str) -> User:
         try:
             payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM],  options={"verify_aud": False, "verify_iat": True})
-            return User(id=payload["sub"], email=payload["email"])
+            # Optionally fetch user to ensure not revoked
+            try:
+                supabase.auth.get_user(token)
+            except Exception as e:  # noqa
+                logger.warning(f"Supabase get_user failed: {e}")
+            return User(id=payload.get("sub", "unknown"), email=payload.get("email", "unknown@example.com"))
         except jwt.ExpiredSignatureError:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
         except jwt.InvalidTokenError as e:

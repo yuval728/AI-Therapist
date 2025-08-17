@@ -1,6 +1,5 @@
-from typing import TypedDict, List, Optional, Annotated
+from typing import TypedDict, List, Optional
 from langchain_core.messages import BaseMessage
-from langgraph.graph.message import add_messages
 
 
 class TherapyState(TypedDict):
@@ -15,3 +14,4 @@ class TherapyState(TypedDict):
     mode: Optional[str]  # 'chat' or 'journal' (from classifier)
     journal_entry: Optional[str]  # if journal, store full entry
     attack: Optional[str]
+    summary: Optional[str]  # rolling summary of earlier context

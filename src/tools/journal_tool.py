@@ -1,12 +1,13 @@
-from litellm import completion
-from pydantic import BaseModel
+from src.config import get_settings
+from src.llm_utils import async_completion
+settings = get_settings()
 # import json
 
 # class JournalAnalyzer(BaseModel):
 #     journal_entry: str
     
     
-def journal_tool(entry: str) -> str:
+async def journal_tool(entry: str) -> str:
     """
     Reflects on a user's journal entry and provides a supportive, therapeutic response.
     Can be used for journaling, mood tracking, or self-awareness.
@@ -20,7 +21,7 @@ def journal_tool(entry: str) -> str:
         {"role": "user", "content": f"Journal Entry:\n{entry}"}
     ]
     
-    response = completion(model="gemini/gemini-2.0-flash", messages=messages, temperature=0.0)
+    response = await async_completion(model=settings.model_chat, messages=messages, temperature=settings.temperature_chat)
     response = response["choices"][0]["message"]["content"]
     return response
     

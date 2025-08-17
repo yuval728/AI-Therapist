@@ -1,8 +1,8 @@
 from langgraph.graph import StateGraph, END
-from litellm import completion
 from src.tools.emotions_analyzer import emotion_tool
 from src.tools.crisis_detector import crisis_tool
 from src.tools.journal_tool import journal_tool
+from src.llm_utils import async_completion
 from src.memory.state import TherapyState
 from src.guardrails.input_moderation import (
     contains_dangerous_response,
@@ -16,41 +16,49 @@ from src.memory.memory_manager import (
     get_memory,
     save_to_long_term_memory,
     search_long_term_memory,
+    prune_messages,
 )
+from src.models.enums import AttackType
+from src.config import get_settings
+
+settings = get_settings()
+
+
+class PromptBuilder:
+    """Centralizes prompt assembly to avoid duplication and manage context formatting."""
+    @staticmethod
+    def build(state, history, relevant_memories):
+        system_parts = [
+            "You are a compassionate therapist.",
+            f"User current emotion (heuristic): {state.get('emotion') or 'unknown'}.",
+            "Provide supportive, professional, non-diagnostic responses.",
+        ]
+        if state.get("summary"):
+            system_parts.append("Earlier summary:\n" + state["summary"][:800])
+        if relevant_memories:
+            system_parts.append("Relevant past context bullets:" )
+            for mem in relevant_memories[:5]:
+                system_parts.append(f"- {mem[:300]}")
+
+        system_msg = {"role": "system", "content": "\n".join(system_parts)}
+        messages = [system_msg]
+        for m in history:
+            messages.append({"role": "user" if m.type == 'human' else 'assistant', "content": m.content})
+        # Latest user input appended once
+        messages.append({"role": "user", "content": state["input"]})
+        return messages
 
 # === Therapy Logic Nodes ===
 
-def therapy_node(state: TherapyState) -> TherapyState:
+async def therapy_node(state: TherapyState) -> TherapyState:
     """Main therapy chat node: builds prompt, queries model, updates memory."""
     user_input = state["input"]
+    state = prune_messages(state)
     history = get_memory(state, from_db=False)
-    memory_msgs = [
-        {
-            "role": "user" if isinstance(m, HumanMessage) else "assistant",
-            "content": m.content,
-        }
-        for m in history
-    ]
-    system_msg = {
-        "role": "system",
-        "content": f"You are a compassionate therapist. The user currently feels {state['emotion']}.",
-    }
-    memory_msgs.insert(0, system_msg)
-    memory_msgs.append({"role": "user", "content": user_input})
-
     relevant_docs = search_long_term_memory(state["user_id"], user_input)
     relevant_memories = [doc.page_content for doc in relevant_docs]
-
-    prompt = [system_msg]
-    if relevant_memories:
-        prompt.append({
-            "role": "system",
-            "content": f"The user previously shared the following relevant context:\n{chr(10).join(relevant_memories)}",
-        })
-    prompt += memory_msgs
-    prompt.append({"role": "user", "content": user_input})
-
-    response = completion(model="gemini/gemini-2.0-flash", messages=prompt)
+    prompt = PromptBuilder.build(state, history, relevant_memories)
+    response = await async_completion(model=settings.model_chat, temperature=settings.temperature_chat, messages=prompt)
     ai_message = response["choices"][0]["message"]["content"]
 
     state = append_to_memory(state, HumanMessage(content=user_input), role="user")
@@ -62,14 +70,15 @@ def therapy_node(state: TherapyState) -> TherapyState:
         "relevant_memories": relevant_memories,
     }
 
-def emotion_node(state: TherapyState) -> TherapyState:
+async def emotion_node(state: TherapyState) -> TherapyState:
     """Detects emotion from user input."""
-    emotion = emotion_tool(state["input"])
+    emotion = await emotion_tool(state["input"])
     return {**state, "emotion": emotion}
 
-def crisis_check_node(state: TherapyState) -> str:
-    """Returns 'crisis' if input is a crisis, else 'safe'."""
-    return "crisis" if crisis_tool(state["input"]) else "safe"
+async def crisis_check_node_async(state: TherapyState) -> str:
+    is_crisis = await crisis_tool(state["input"])
+    state["is_crisis"] = is_crisis
+    return "crisis" if is_crisis else "safe"
 
 def crisis_node(state: TherapyState) -> TherapyState:
     """Handles crisis situations with a supportive message."""
@@ -82,11 +91,11 @@ def crisis_node(state: TherapyState) -> TherapyState:
     state = append_to_memory(state, AIMessage(content=message), role="assistant")
     return {**state, "response": message}
 
-def journal_intent_node(state: TherapyState) -> TherapyState:
+async def journal_intent_node(state: TherapyState) -> TherapyState:
     """Classifies input as 'journal' or 'chat'."""
     user_input = state["input"]
-    response = completion(
-        model="gemini/gemini-2.0-flash-lite",
+    response = await async_completion(
+        model=settings.model_light,
         messages=[
             {
                 "role": "system",
@@ -94,6 +103,7 @@ def journal_intent_node(state: TherapyState) -> TherapyState:
             },
             {"role": "user", "content": f"Message: {user_input}"},
         ],
+        temperature=settings.temperature_classifiers,
     )
     result = response["choices"][0]["message"]["content"].strip().lower()
     return {**state, "mode": result}
@@ -102,10 +112,10 @@ def is_journal_entry(state: TherapyState) -> bool:
     """Returns True if input is a journal entry."""
     return state["mode"] == "journal"
 
-def journal_node(state: TherapyState) -> TherapyState:
+async def journal_node(state: TherapyState) -> TherapyState:
     """Handles journal entries, saves to memory, returns reflection."""
     entry = state["input"]
-    reflection = journal_tool(entry)
+    reflection = await journal_tool(entry)
     save_to_long_term_memory(state["user_id"], content=entry, metadata={"type": "journal"})
     state = append_to_memory(state, HumanMessage(content=entry), role="user")
     state = append_to_memory(state, AIMessage(content=reflection), role="assistant")
@@ -120,10 +130,10 @@ def response_validation_node(state: TherapyState) -> str:
 def input_moderation_check(state: TherapyState) -> dict:
     """Checks input for unsafe content or prompt injection."""
     if contains_unsafe_content(state["input"]):
-        return {**state, "attack": "blocked"}
+        return {**state, "attack": AttackType.BLOCKED.value}
     if detect_prompt_injection(state["input"]):
-        return {**state, "attack": "injected"}
-    return {**state, "attack": "safe"}
+        return {**state, "attack": AttackType.INJECTED.value}
+    return {**state, "attack": AttackType.SAFE.value}
 
 def handle_blocked_input(state: TherapyState) -> TherapyState:
     """Handles blocked (unsafe) input."""
@@ -151,7 +161,7 @@ def output_validation_node(state: TherapyState) -> TherapyState:
 def pii_detection_node(state: TherapyState) -> TherapyState:
     """Detects PII in input."""
     if detect_pii(state["input"]):
-        return {**state, "attack": "pii_found"}
+        return {**state, "attack": AttackType.PII_FOUND.value}
     return state
 
 def handle_pii(state: TherapyState) -> TherapyState:
@@ -175,7 +185,7 @@ def build_therapy_graph():
     graph.add_node("check_pii", pii_detection_node)
     graph.add_node("handle_pii", handle_pii)
     graph.add_node("analyze_emotion", emotion_node)
-    graph.add_node("check_crisis", crisis_check_node)
+    graph.add_node("check_crisis", crisis_check_node_async)
     graph.add_node("crisis", crisis_node)
     graph.add_node("check_journal", journal_intent_node)
     graph.add_node("journal", journal_node)
@@ -210,7 +220,7 @@ def build_therapy_graph():
 
     graph.add_conditional_edges(
         "analyze_emotion",
-        crisis_check_node,
+    crisis_check_node_async,
         {
             "safe": "check_journal",
             "crisis": "crisis",

@@ -7,6 +7,10 @@ router = APIRouter()
 
 @router.post("/signup", response_model=User)
 async def sign_up(data: SignUpRequest):
+    """Create a new user.
+    NOTE: Supabase may require email confirmation; no access token returned here.
+    Frontend should prompt user to verify email then sign in.
+    """
     user = await SupabaseAuthService.sign_up(data.email, data.password)
     if not user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Signup failed")

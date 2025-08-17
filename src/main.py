@@ -1,25 +1,38 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
 from .routes import auth
 from .websocket_routes import chat
+from .config import get_settings
+from .logging_utils import configure_logging, log_event
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from fastapi.responses import Response
 
-app = FastAPI()
+settings = get_settings()
+configure_logging()
 
-# Allow CORS (customize origin in production)
+app = FastAPI(title=settings.app_name)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Routers
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 app.include_router(chat.router, prefix="/chat", tags=["Chat"])
-# app.include_router(journal.router, prefix="/journal", tags=["Journal"])
+
+@app.get("/healthz")
+async def health():
+    return {"status": "ok"}
 
 @app.get("/")
-def root():
+async def root():
+    log_event("root_access")
     return {"message": "AI Therapist API is live."}
+
+@app.get("/metrics")
+async def metrics():
+    data = generate_latest()
+    return Response(content=data, media_type=CONTENT_TYPE_LATEST)
