@@ -13,7 +13,7 @@ from src.models import (
     TherapySession, SessionMessage, EmotionType, CrisisLevel,
     MessageType, APIResponse
 )
-from src.utils import log_therapy_event, rate_limiter, timing_decorator
+from src.utils import log_therapy_event, timing_decorator
 from src.config import get_settings
 
 # WebSocket connection manager

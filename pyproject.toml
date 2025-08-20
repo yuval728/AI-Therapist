@@ -19,6 +19,7 @@ dependencies = [
     "prometheus-client>=0.21.0",
     "python-dotenv>=1.0.1",
     "langchain-huggingface>=0.1.2",
+    "asyncpg>=0.30.0",
 ]
 
 [project.optional-dependencies]

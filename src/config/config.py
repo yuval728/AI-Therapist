@@ -2,8 +2,8 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional, Union
-from pydantic import Field, validator, root_validator
-from pydantic_settings import BaseSettings
+from pydantic import Field, validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class DatabaseSettings(BaseSettings):
@@ -100,10 +100,10 @@ class Settings(BaseSettings):
     reload: bool = Field(default=True, env="RELOAD")
     
     # CORS settings
-    cors_origins: List[str] = Field(
-        default=["http://localhost:5173", "http://127.0.0.1:5173"],
-        env="CORS_ORIGINS"
-    )
+    # cors_origins: List[str] = Field(
+    #     default=["http://localhost:5173", "http://127.0.0.1:5173"],
+    #     env="CORS_ORIGINS"
+    # )
     cors_allow_credentials: bool = Field(default=True, env="CORS_ALLOW_CREDENTIALS")
     
     # Nested settings
@@ -125,13 +125,13 @@ class Settings(BaseSettings):
             raise ValueError(f'Environment must be one of: {valid_envs}')
         return v
     
-    @validator('cors_origins', pre=True)
-    def parse_cors_origins(cls, v):
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(',')]
-        return v
+    # @validator('cors_origins', pre=True)
+    # def parse_cors_origins(cls, v):
+    #     if isinstance(v, str):
+    #         return [origin.strip() for origin in v.split(',') if origin.strip()]
+    #     return v
     
-    @root_validator
+    @model_validator(mode="before")
     def validate_production_settings(cls, values):
         environment = values.get('environment')
         if environment == 'production':
@@ -153,12 +153,15 @@ class Settings(BaseSettings):
     def is_testing(self) -> bool:
         return self.environment == 'testing'
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
-        env_nested_delimiter = "__"  # Allows DATABASE__URL format
-        validate_assignment = True
+    # Pydantic v2 settings configuration
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        env_nested_delimiter="__",
+        validate_assignment=True,
+        extra="ignore",  # Ignore unrelated env vars at the top level
+    )
 
 
 @lru_cache(maxsize=1)

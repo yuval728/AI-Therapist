@@ -18,8 +18,7 @@ class SignUpRequest(BaseModel):
     email: EmailStr = Field(..., description="User email address")
     password: str = Field(..., min_length=8, max_length=128, description="User password")
     confirm_password: str = Field(..., description="Password confirmation")
-    first_name: Optional[str] = Field(None, max_length=50, description="User first name")
-    last_name: Optional[str] = Field(None, max_length=50, description="User last name")
+    full_name: Optional[str] = Field(None, max_length=120, description="User full name")
     terms_accepted: bool = Field(..., description="Terms of service acceptance")
     
     @validator('confirm_password')
@@ -37,7 +36,7 @@ class SignUpRequest(BaseModel):
 
 class OAuthRequest(BaseModel):
     """OAuth authentication request model."""
-    provider: str = Field(..., regex=r'^(google|github|apple|facebook)$')
+    provider: str = Field(..., pattern=r'^(google|github|apple|facebook)$')
     redirect_url: Optional[str] = Field(None, description="Custom redirect URL")
 
 
@@ -53,21 +52,18 @@ class TokenResponse(BaseModel):
 class User(BaseEntity):
     """User profile model."""
     email: EmailStr = Field(..., description="User email address")
-    first_name: Optional[str] = Field(None, max_length=50)
-    last_name: Optional[str] = Field(None, max_length=50)
+    full_name: Optional[str] = Field(None, max_length=120)
     role: UserRole = Field(default=UserRole.CLIENT)
     is_active: bool = Field(default=True)
     is_verified: bool = Field(default=False)
     last_login: Optional[datetime] = None
     login_count: int = Field(default=0, ge=0)
     preferences: dict = Field(default_factory=dict)
-    
+
     @property
-    def full_name(self) -> Optional[str]:
-        """Get user's full name."""
-        if self.first_name and self.last_name:
-            return f"{self.first_name} {self.last_name}"
-        return self.first_name or self.last_name
+    def display_name(self) -> Optional[str]:
+        """Preferred display name (full_name)."""
+        return self.full_name
 
 
 class UserSession(BaseEntity):
@@ -101,8 +97,8 @@ class PasswordResetConfirm(BaseModel):
 
 class UserPreferences(BaseModel):
     """User preferences and settings."""
-    theme: str = Field(default="light", regex=r'^(light|dark|auto)$')
-    language: str = Field(default="en", regex=r'^[a-z]{2}$')
+    theme: str = Field(default="light", pattern=r'^(light|dark|auto)$')
+    language: str = Field(default="en", pattern=r'^[a-z]{2}$')
     timezone: str = Field(default="UTC")
     notifications_enabled: bool = Field(default=True)
     crisis_alerts_enabled: bool = Field(default=True)

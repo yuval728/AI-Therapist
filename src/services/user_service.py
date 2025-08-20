@@ -3,8 +3,8 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 
 from src.database import get_supabase_client
-from src.models import UserProfile, APIResponse, ValidationError
-from src.utils import log_therapy_event, timing_decorator
+from src.models import User, APIResponse
+from src.utils import log_therapy_event, timing_decorator, ValidationError
 
 
 class UserService:
@@ -19,7 +19,7 @@ class UserService:
             self.supabase_client = await get_supabase_client()
     
     @timing_decorator("user_get_profile")
-    async def get_user_profile(self, user_id: str) -> APIResponse[UserProfile]:
+    async def get_user_profile(self, user_id: str) -> APIResponse[User]:
         """Get user profile by ID."""
         await self._ensure_initialized()
         
@@ -34,7 +34,7 @@ class UserService:
                 )
             
             profile_data = result.data[0]
-            profile = UserProfile(
+            profile = User(
                 id=profile_data["id"],
                 email=profile_data["email"],
                 full_name=profile_data.get("full_name"),
@@ -65,7 +65,7 @@ class UserService:
         self, 
         user_id: str, 
         updates: Dict[str, Any]
-    ) -> APIResponse[UserProfile]:
+    ) -> APIResponse[User]:
         """Update user profile."""
         await self._ensure_initialized()
         

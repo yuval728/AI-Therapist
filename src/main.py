@@ -14,7 +14,10 @@ from src.api import (
 )
 from src.database import get_supabase_client
 from src.config import get_settings
-from src.utils import log_therapy_event, configure_logging
+from src.utils import log_event, configure_logging
+
+from dotenv import load_dotenv  
+load_dotenv()
 
 
 @asynccontextmanager
@@ -22,9 +25,9 @@ async def lifespan(app: FastAPI):
     """Application lifespan management."""
     # Startup
     settings = get_settings()
-    configure_logging()
+    configure_logging(structured=False)
     
-    log_therapy_event(
+    log_event(
         event="application_startup",
         environment=settings.environment,
         version=settings.version
@@ -33,9 +36,9 @@ async def lifespan(app: FastAPI):
     # Initialize database connection
     try:
         await get_supabase_client()
-        log_therapy_event(event="database_connected")
+        log_event(event="database_connected")
     except Exception as e:
-        log_therapy_event(
+        log_event(
             event="database_connection_failed",
             error=str(e)
         )
@@ -43,7 +46,7 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
-    log_therapy_event(event="application_shutdown")
+    log_event(event="application_shutdown")
 
 
 def create_app() -> FastAPI:
@@ -66,7 +69,7 @@ def create_app() -> FastAPI:
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
+        allow_origins=["*"],
         allow_credentials=settings.cors_allow_credentials,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["*"],
@@ -124,7 +127,7 @@ def create_app() -> FastAPI:
         """Handle HTTP exceptions with structured response."""
         request_id = getattr(request.state, 'request_id', 'unknown')
         
-        log_therapy_event(
+        log_event(
             event="http_exception",
             request_id=request_id,
             status_code=exc.status_code,
@@ -148,7 +151,7 @@ def create_app() -> FastAPI:
         """Handle unexpected exceptions."""
         request_id = getattr(request.state, 'request_id', 'unknown')
         
-        log_therapy_event(
+        log_event(
             event="unhandled_exception",
             request_id=request_id,
             error=str(exc),

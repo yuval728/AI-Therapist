@@ -2,7 +2,7 @@
 from typing import Dict, Any, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 
-from src.models import UserProfile, APIResponse, PaginationParams
+from src.models import User, APIResponse, PaginationParams
 from src.services import get_user_service
 from src.api.middleware import get_current_user
 from src.utils import log_therapy_event
@@ -13,7 +13,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 @router.get("/profile")
 async def get_profile(
     current_user: Dict[str, Any] = Depends(get_current_user)
-) -> APIResponse[UserProfile]:
+) -> APIResponse[User]:
     """Get current user's profile."""
     user_service = await get_user_service()
     user_id = current_user["user"]["id"]
@@ -33,7 +33,7 @@ async def get_profile(
 async def update_profile(
     updates: Dict[str, Any],
     current_user: Dict[str, Any] = Depends(get_current_user)
-) -> APIResponse[UserProfile]:
+) -> APIResponse[User]:
     """Update current user's profile."""
     user_service = await get_user_service()
     user_id = current_user["user"]["id"]

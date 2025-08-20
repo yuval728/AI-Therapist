@@ -32,9 +32,7 @@ from .memory.memory_manager import (
 )
 
 # Tools
-from .tools.emotions_analyzer import emotion_tool
-from .tools.crisis_detector import crisis_tool
-from .tools.journal_tool import journal_tool
+from .tools import emotion_tool, crisis_tool, journal_tool
 
 __all__ = [
     # Core flow

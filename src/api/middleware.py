@@ -2,14 +2,14 @@
 from typing import Callable, Optional
 import time
 import uuid
-from fastapi import Request, Response, HTTPException, status
+from fastapi import Request, Response, HTTPException, status, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 import asyncio
 
 from src.services import get_auth_service
-from src.utils import log_therapy_event, rate_limiter
+from src.utils import log_therapy_event
 from src.config import get_settings
 
 
@@ -248,22 +248,43 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
 auth_middleware = AuthenticationMiddleware()
 
 
-async def get_current_user(request: Request) -> dict:
-    """Dependency to get current authenticated user."""
-    user_data = await auth_middleware(request)
-    
-    if not user_data:
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Security(HTTPBearer())
+) -> dict:
+    """Dependency to get current authenticated user using Bearer token.
+    This also registers the HTTP Bearer security scheme in OpenAPI, enabling the
+    "Authorize" button in Swagger UI.
+    """
+    if not credentials or not credentials.credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required"
         )
-    
-    return user_data
+
+    auth_service = await get_auth_service()
+    auth_result = await auth_service.get_current_user(credentials.credentials)
+
+    if not auth_result.success:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials"
+        )
+
+    return auth_result.data
 
 
-async def get_optional_user(request: Request) -> Optional[dict]:
-    """Dependency to get current user if authenticated, None otherwise."""
+async def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(HTTPBearer(auto_error=False))
+) -> Optional[dict]:
+    """Dependency to get current user if authenticated, None otherwise.
+    Uses Bearer token when provided so it appears in OpenAPI but does not error if missing.
+    """
+    if not credentials or not credentials.credentials:
+        return None
+
     try:
-        return await auth_middleware(request)
-    except HTTPException:
+        auth_service = await get_auth_service()
+        auth_result = await auth_service.get_current_user(credentials.credentials)
+        return auth_result.data if auth_result.success else None
+    except Exception:
         return None

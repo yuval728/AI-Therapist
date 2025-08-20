@@ -1,11 +1,10 @@
 """Authentication API routes."""
 from typing import Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 
 from src.models import (
-    SignInRequest, SignUpRequest, OAuthRequest, UserProfile,
-    APIResponse, ValidationError
+    SignInRequest, SignUpRequest, OAuthRequest, APIResponse, User
 )
 from src.services import get_auth_service
 from src.api.middleware import get_current_user, get_optional_user
@@ -15,7 +14,7 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 
 
 @router.post("/signup")
-async def sign_up(request: SignUpRequest) -> APIResponse[UserProfile]:
+async def sign_up(request: SignUpRequest) -> APIResponse[User]:
     """Register a new user account.
     
     Creates a new user account with email verification.

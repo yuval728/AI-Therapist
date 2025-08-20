@@ -8,9 +8,9 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
 from src.database import get_supabase_client
-from src.config import get_settings
-from src.utils import log_therapy_event
+from dotenv import load_dotenv
 
+load_dotenv()
 
 async def setup_database():
     """Initialize Supabase database with schema and test connection."""
@@ -20,7 +20,7 @@ async def setup_database():
         # Initialize client
         client = await get_supabase_client()
         print("✅ Supabase client initialized successfully")
-        
+
         # Test basic operations
         await test_database_operations(client)
         
@@ -38,6 +38,7 @@ async def test_database_operations(client):
     
     # Test 1: Check if tables exist
     try:
+        print(client)
         result = client.client.table("profiles").select("count", count="exact").limit(1).execute()
         print("✅ Profiles table accessible")
     except Exception as e:
@@ -64,6 +65,15 @@ async def test_database_operations(client):
             "match_threshold": 0.5,
             "match_count": 1
         }).execute()
+        if result.error:
+            # Try legacy signature without threshold
+            result2 = client.client.rpc("match_documents", {
+                "user_id": "00000000-0000-0000-0000-000000000000",
+                "query_embedding": [0.0] * 768,
+                "match_count": 1
+            }).execute()
+            if result2.error:
+                raise Exception(str(result2.error))
         print("✅ Vector search function accessible")
     except Exception as e:
         print(f"❌ Vector search test failed: {str(e)}")

@@ -5,10 +5,10 @@ from datetime import datetime, timezone
 
 from src.auth import SupabaseAuth, AuthResult, get_auth_service as get_supabase_auth
 from src.models import (
-    SignUpRequest, SignInRequest, OAuthRequest, UserProfile,
-    APIResponse, ValidationError
+    SignUpRequest, SignInRequest, OAuthRequest, User,
+    APIResponse
 )
-from src.utils import log_therapy_event, timing_decorator, validate_email, validate_password
+from src.utils import log_therapy_event, timing_decorator, ValidationError, validate_email_address, validate_password_strength      
 from src.config import get_settings
 
 
@@ -25,21 +25,21 @@ class AuthService:
             self.supabase_auth = await get_supabase_auth()
     
     @timing_decorator("auth_signup")
-    async def sign_up(self, request: SignUpRequest) -> APIResponse[UserProfile]:
+    async def sign_up(self, request: SignUpRequest) -> APIResponse[User]:
         """Handle user registration with validation."""
         await self._ensure_initialized()
         
         try:
             # Validate input
-            if not validate_email(request.email):
+            if not validate_email_address(request.email):
                 raise ValidationError("Invalid email format")
             
-            if not validate_password(request.password):
+            if not validate_password_strength(request.password):
                 raise ValidationError("Password does not meet security requirements")
             
             # Attempt signup
             auth_result = await self.supabase_auth.sign_up(request)
-            
+            print(auth_result)
             if not auth_result.success:
                 log_therapy_event(
                     event="signup_failed",
@@ -53,11 +53,11 @@ class AuthService:
                 )
             
             # Create user profile response
-            user_profile = UserProfile(
+            user_profile = User(
                 id=auth_result.user_id,
                 email=auth_result.email,
                 full_name=request.full_name,
-                preferences=request.preferences or {},
+                preferences={},
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc)
             )
@@ -99,7 +99,7 @@ class AuthService:
         
         try:
             # Validate input
-            if not validate_email(request.email):
+            if not validate_email_address(request.email):
                 raise ValidationError("Invalid email format")
             
             # Attempt signin
@@ -315,7 +315,7 @@ class AuthService:
         await self._ensure_initialized()
         
         try:
-            if not validate_email(email):
+            if not validate_email_address(email):
                 raise ValidationError("Invalid email format")
             
             auth_result = await self.supabase_auth.reset_password(email)

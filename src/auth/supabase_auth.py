@@ -5,7 +5,7 @@ import asyncio
 from datetime import datetime, timezone
 
 from src.database import get_supabase_client, supabase_session
-from src.models import UserProfile, SignInRequest, SignUpRequest, OAuthRequest
+from src.models import User, SignInRequest, SignUpRequest, OAuthRequest
 from src.utils import log_therapy_event, timing_decorator, ValidationError
 from src.config import get_settings
 
@@ -48,8 +48,7 @@ class SupabaseAuth:
                 "password": request.password,
                 "options": {
                     "data": {
-                        "full_name": request.full_name,
-                        "preferences": request.preferences or {}
+                        "full_name": request.full_name
                     }
                 }
             })
@@ -62,28 +61,40 @@ class SupabaseAuth:
             
             user_id = auth_response.user.id
             
-            # Create user profile
+            # Create user profile (required)
             profile_result = await self.supabase_client.create_user_profile(
                 user_id=user_id,
                 full_name=request.full_name,
                 email=request.email,
-                preferences=request.preferences or {}
+                preferences={}
             )
-            
+
+            if not profile_result.success:
+                log_therapy_event(
+                    event="user_signup_failed",
+                    email=request.email,
+                    user_id=user_id,
+                    error=profile_result.error or "Profile creation failed"
+                )
+                return AuthResult(
+                    success=False,
+                    error=profile_result.error or "Profile creation failed"
+                )
+
             log_therapy_event(
                 event="user_signup_completed",
                 user_id=user_id,
                 email=request.email,
-                profile_created=profile_result.success
+                profile_created=True
             )
-            
+
             return AuthResult(
                 success=True,
                 user_id=user_id,
                 email=request.email,
                 access_token=auth_response.session.access_token if auth_response.session else None,
                 refresh_token=auth_response.session.refresh_token if auth_response.session else None,
-                metadata={"profile_created": profile_result.success}
+                metadata={"profile_created": True}
             )
             
         except Exception as e:

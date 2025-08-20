@@ -8,6 +8,9 @@ sys.path.append(str(Path(__file__).parent / "src"))
 
 from src.config import get_settings
 
+from dotenv import load_dotenv  
+load_dotenv()
+
 def main():
     """Run the development server."""
     settings = get_settings()

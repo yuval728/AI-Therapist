@@ -1,6 +1,6 @@
 """Base models and mixins for the AI therapist application."""
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Generic, TypeVar, List
 from pydantic import BaseModel, Field
 from uuid import uuid4
 
@@ -20,11 +20,15 @@ class BaseEntity(TimestampMixin):
     id: str = Field(default_factory=lambda: str(uuid4()))
 
 
-class APIResponse(BaseModel):
+T = TypeVar("T")
+
+
+class APIResponse(BaseModel, Generic[T]):
     """Standard API response format."""
     success: bool = True
     message: Optional[str] = None
-    data: Optional[dict] = None
+    data: Optional[T] = None
+    error: Optional[str] = None
     error_code: Optional[str] = None
 
 
@@ -39,9 +43,9 @@ class PaginationParams(BaseModel):
         return (self.page - 1) * self.limit
 
 
-class PaginatedResponse(BaseModel):
+class PaginatedResponse(BaseModel, Generic[T]):
     """Standard paginated response format."""
-    items: list
+    items: List[T]
     total: int
     page: int
     limit: int

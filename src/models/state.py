@@ -53,7 +53,7 @@ class SessionMessage(BaseEntity):
     session_id: str = Field(..., description="Parent session ID")
     user_id: str = Field(..., description="User identifier")
     content: str = Field(..., min_length=1, max_length=5000)
-    message_type: str = Field(..., regex=r'^(user|assistant|system)$')
+    message_type: str = Field(..., pattern=r'^(user|assistant|system)$')
     emotion_detected: Optional[EmotionType] = None
     emotion_confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
     attack_detected: Optional[AttackType] = None

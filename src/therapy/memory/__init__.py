@@ -5,7 +5,7 @@ from .memory_manager import (
     search_long_term_memory,
     prune_messages,
 )
-from .state import TherapyState
+from ...models import TherapyState
 
 __all__ = [
     "append_to_memory",

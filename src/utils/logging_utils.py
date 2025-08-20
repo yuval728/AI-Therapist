@@ -1,10 +1,11 @@
 """Enhanced logging utilities with structured logging support."""
 import sys
+import logging
 import json
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 from loguru import logger
-from datetime import datetime
+from datetime import datetime, timezone
 
 CONFIGURED = False
 
@@ -20,48 +21,52 @@ def configure_logging(
     global CONFIGURED
     if CONFIGURED:
         return
-    
+
     # Remove default handler
     logger.remove()
-    
+
     # Console handler with formatting
     console_format = (
-        "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+        "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
         "<level>{level: <8}</level> | "
         "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
-        "<level>{message}</level>"
+        "<level>{message}</level> "
+        # "<yellow>{extra}</yellow>"
     )
     
     if structured:
+        # When serialize=True, format is ignored; keep simple for non-structured
         console_format = "{message}"
-    
+
     logger.add(
         sys.stdout,
         format=console_format,
-        level=level,
+        level=level.upper(),
         serialize=structured,
         backtrace=include_trace,
         diagnose=include_trace,
-        colorize=not structured
+        colorize=not structured,
+        enqueue=True
     )
-    
+
     # File handler if requested
     if log_to_file:
         log_path = Path(log_dir or "logs") / "app.log"
-        log_path.parent.mkdir(exist_ok=True)
-        
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
         logger.add(
             str(log_path),
             format=console_format,
-            level=level,
+            level=level.upper(),
             rotation="10 MB",
             retention="30 days",
             compression="gz",
             serialize=structured,
             backtrace=include_trace,
-            diagnose=include_trace
+            diagnose=include_trace,
+            enqueue=True
         )
-    
+
     CONFIGURED = True
 
 
@@ -75,7 +80,7 @@ def log_event(
     """Log structured event with context."""
     log_data = {
         "event": event,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         **fields
     }
     
@@ -84,13 +89,22 @@ def log_event(
     if session_id:
         log_data["session_id"] = session_id
     
-    logger.bind(**log_data).log(level, event)
+    # Enhanced verbosity for errors: include stack traces and exception if provided
+    upper_level = level.upper()
+    exc_obj = log_data.pop("exc", None)
+    if upper_level in ("ERROR", "CRITICAL") or isinstance(exc_obj, BaseException):
+        logger.bind(**log_data).opt(
+            exception=exc_obj if isinstance(exc_obj, BaseException) else True,
+            backtrace=True
+        ).log(upper_level, event)
+    else:
+        logger.bind(**log_data).log(upper_level, event)
 
 
 def log_therapy_event(
     event: str,
-    user_id: str,
-    session_id: str,
+    user_id: str = None,
+    session_id: str = None,
     emotion: Optional[str] = None,
     crisis_detected: bool = False,
     processing_time_ms: Optional[int] = None,

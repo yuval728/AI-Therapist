@@ -2,7 +2,7 @@
 import os
 from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import asyncio
 from contextlib import asynccontextmanager
 
@@ -13,7 +13,7 @@ from langchain_core.documents import Document
 
 from src.config import get_settings
 from src.models import TherapySession, SessionMessage, CrisisLevel, EmotionType, MessageType
-from src.utils import log_therapy_event, timing_decorator, ValidationError
+from src.utils import log_event, timing_decorator, ValidationError
 
 
 @dataclass
@@ -66,53 +66,50 @@ class SupabaseClient:
     async def initialize(self) -> bool:
         """Initialize Supabase client and vector store."""
         try:
-            # Initialize Supabase client
-            self.client = create_client(self.config.url, self.config.key)
             
-            # Initialize embeddings
+            effective_key = self.config.service_role_key or self.config.key
+            self.client = create_client(self.config.url, effective_key)
+            
+            # Initialize embeddings (optional)
             google_api_key = os.getenv("GOOGLE_API_KEY")
-            if not google_api_key:
-                raise ValueError("GOOGLE_API_KEY required for embeddings")
-            
-            self.embeddings = GoogleGenerativeAIEmbeddings(
-                model="models/embedding-001",
-                google_api_key=google_api_key
-            )
-            
-            # Initialize vector store
-            self.vector_store = SupabaseVectorStore(
-                client=self.client,
-                embedding=self.embeddings,
-                table_name="documents",
-                query_name="match_documents"
-            )
-            
-            # Test connection
-            await self._test_connection()
+            if google_api_key:
+                try:
+                    self.embeddings = GoogleGenerativeAIEmbeddings(
+                        model="models/embedding-001",
+                        google_api_key=google_api_key
+                    )
+                    # Initialize vector store (only if embeddings available)
+                    self.vector_store = SupabaseVectorStore(
+                        client=self.client,
+                        embedding=self.embeddings,
+                        table_name="documents",
+                        query_name="match_documents"
+                    )
+                except Exception as e:
+                    # Don't block overall initialization on vector store setup
+                    log_event(event="embeddings_init_warning", error=str(e))
+            else:
+                log_event(event="embeddings_not_configured", message="GOOGLE_API_KEY not set; vector features disabled")
+           
             self._initialized = True
             
-            log_therapy_event(
+            log_event(
                 event="supabase_client_initialized",
-                metadata={"url": self.config.url[:50] + "..."}
+                metadata={
+                    "url": self.config.url[:50] + "...",
+                    "using_service_role": bool(self.config.service_role_key)
+                }
             )
             
             return True
             
         except Exception as e:
-            log_therapy_event(
+            log_event(
                 event="supabase_initialization_failed",
                 error=str(e)
             )
             return False
-    
-    async def _test_connection(self):
-        """Test database connection."""
-        try:
-            result = self.client.table("profiles").select("count", count="exact").limit(1).execute()
-            if result.error:
-                raise Exception(f"Connection test failed: {result.error}")
-        except Exception as e:
-            raise Exception(f"Database connection failed: {str(e)}")
+
     
     def _ensure_initialized(self):
         """Ensure client is initialized."""
@@ -145,7 +142,7 @@ class SupabaseClient:
             if result.error:
                 return QueryResult(data=[], error=str(result.error), success=False)
             
-            log_therapy_event(
+            log_event(
                 event="user_profile_created",
                 user_id=user_id,
                 email=email
@@ -154,7 +151,7 @@ class SupabaseClient:
             return QueryResult(data=result.data)
             
         except Exception as e:
-            log_therapy_event(
+            log_event(
                 event="user_profile_creation_failed",
                 user_id=user_id,
                 error=str(e)
@@ -201,7 +198,7 @@ class SupabaseClient:
             if result.error:
                 return QueryResult(data=[], error=str(result.error), success=False)
             
-            log_therapy_event(
+            log_event(
                 event="therapy_session_created",
                 user_id=session.user_id,
                 session_id=session.session_id
@@ -210,7 +207,7 @@ class SupabaseClient:
             return QueryResult(data=result.data)
             
         except Exception as e:
-            log_therapy_event(
+            log_event(
                 event="therapy_session_creation_failed",
                 user_id=session.user_id,
                 error=str(e)
@@ -239,7 +236,7 @@ class SupabaseClient:
             if result.error:
                 return QueryResult(data=[], error=str(result.error), success=False)
             
-            log_therapy_event(
+            log_event(
                 event="therapy_session_updated",
                 user_id=user_id,
                 session_id=session_id,
@@ -249,7 +246,7 @@ class SupabaseClient:
             return QueryResult(data=result.data)
             
         except Exception as e:
-            log_therapy_event(
+            log_event(
                 event="therapy_session_update_failed",
                 user_id=user_id,
                 session_id=session_id,
@@ -266,7 +263,7 @@ class SupabaseClient:
         session_id: str,
         role: str,
         content: str,
-        message_type: MessageType = MessageType.USER_INPUT,
+        message_type: MessageType = MessageType.USER,
         emotion: Optional[EmotionType] = None,
         emotion_confidence: Optional[float] = None,
         is_crisis: bool = False,
@@ -300,7 +297,7 @@ class SupabaseClient:
             return QueryResult(data=result.data)
             
         except Exception as e:
-            log_therapy_event(
+            log_event(
                 event="memory_log_save_failed",
                 user_id=user_id,
                 session_id=session_id,
@@ -363,7 +360,7 @@ class SupabaseClient:
             
             await asyncio.to_thread(self.vector_store.add_documents, [document])
             
-            log_therapy_event(
+            log_event(
                 event="vector_store_save_success",
                 user_id=user_id,
                 content_type=content_type,
@@ -373,7 +370,7 @@ class SupabaseClient:
             return True
             
         except Exception as e:
-            log_therapy_event(
+            log_event(
                 event="vector_store_save_failed",
                 user_id=user_id,
                 error=str(e)
@@ -406,12 +403,32 @@ class SupabaseClient:
             ).execute()
             
             if result.error:
-                log_therapy_event(
-                    event="vector_search_failed",
-                    user_id=user_id,
-                    error=str(result.error)
-                )
-                return []
+                # Fallback: try legacy function signature without threshold if suggested by PostgREST
+                error_str = str(result.error)
+                if "Could not find the function" in error_str and "match_documents" in error_str:
+                    fallback = self.client.rpc(
+                        "match_documents",
+                        {
+                            "user_id": user_id,
+                            "query_embedding": embedding,
+                            "match_count": k,
+                        }
+                    ).execute()
+                    if fallback.error:
+                        log_event(
+                            event="vector_search_failed",
+                            user_id=user_id,
+                            error=str(fallback.error)
+                        )
+                        return []
+                    result = fallback
+                else:
+                    log_event(
+                        event="vector_search_failed",
+                        user_id=user_id,
+                        error=error_str
+                    )
+                    return []
             
             documents = []
             for row in result.data:
@@ -421,7 +438,7 @@ class SupabaseClient:
                 )
                 documents.append(doc)
             
-            log_therapy_event(
+            log_event(
                 event="vector_search_completed",
                 user_id=user_id,
                 query_length=len(query),
@@ -431,7 +448,7 @@ class SupabaseClient:
             return documents
             
         except Exception as e:
-            log_therapy_event(
+            log_event(
                 event="vector_search_failed",
                 user_id=user_id,
                 error=str(e)
@@ -470,7 +487,7 @@ class SupabaseClient:
             if result.error:
                 return QueryResult(data=[], error=str(result.error), success=False)
             
-            log_therapy_event(
+            log_event(
                 event="crisis_event_logged",
                 user_id=user_id,
                 session_id=session_id,
@@ -481,7 +498,7 @@ class SupabaseClient:
             return QueryResult(data=result.data)
             
         except Exception as e:
-            log_therapy_event(
+            log_event(
                 event="crisis_event_logging_failed",
                 user_id=user_id,
                 session_id=session_id,
@@ -572,7 +589,7 @@ class SupabaseClient:
                 )
                 cleanup_results[table] = len(result.data) if result.data else 0
             except Exception as e:
-                log_therapy_event(
+                log_event(
                     event="cleanup_failed",
                     table=table,
                     error=str(e)

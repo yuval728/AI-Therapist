@@ -1,0 +1,214 @@
+"use client"
+
+import { useState, useEffect, useCallback, useRef } from "react"
+import { WebSocketClient, type WebSocketMessage, type ConnectionStatus } from "@/lib/websocket-client"
+import { apiClient } from "@/lib/api"
+import { useToast } from "@/hooks/use-toast"
+
+interface ChatMessage {
+  id: string
+  role: "user" | "assistant"
+  content: string
+  timestamp: string
+  emotion?: string
+  crisis_level?: number
+  mode?: string
+  metadata?: Record<string, any>
+}
+
+interface StreamingState {
+  content: string
+  isStreaming: boolean
+  metadata?: {
+    emotion?: string
+    crisis_level?: number
+    mode?: string
+    metadata?: Record<string, any>
+  }
+}
+
+export function useWebSocketChat(sessionId?: string) {
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected")
+  const [isTyping, setIsTyping] = useState(false)
+  const [streamingState, setStreamingState] = useState<StreamingState>({
+    content: "",
+    isStreaming: false,
+  })
+  const [error, setError] = useState<string | null>(null)
+
+  const wsClient = useRef<WebSocketClient | null>(null)
+  const { toast } = useToast()
+
+  const handleWebSocketMessage = useCallback(
+    (message: WebSocketMessage) => {
+      console.log("[v0] Processing WebSocket message:", message.type)
+
+      switch (message.type) {
+        case "connected":
+          console.log("[v0] WebSocket connected with session:", message.session_id)
+          setError(null)
+          break
+
+        case "typing":
+          setIsTyping(true)
+          break
+
+        case "response_chunk":
+          if (message.content) {
+            setStreamingState((prev) => ({
+              content: prev.content + message.content,
+              isStreaming: true,
+            }))
+          }
+          break
+
+        case "response_complete":
+          setIsTyping(false)
+          if (message.content) {
+            const assistantMessage: ChatMessage = {
+              id: `msg-${Date.now()}`,
+              role: "assistant",
+              content: message.content,
+              timestamp: message.timestamp,
+              emotion: message.emotion,
+              crisis_level: message.crisis_level,
+              mode: message.mode,
+              metadata: message.metadata,
+            }
+
+            setMessages((prev) => [...prev, assistantMessage])
+            setStreamingState({
+              content: "",
+              isStreaming: false,
+              metadata: {
+                emotion: message.emotion,
+                crisis_level: message.crisis_level,
+                mode: message.mode,
+                metadata: message.metadata,
+              },
+            })
+          }
+          break
+
+        case "error":
+          console.error("[v0] WebSocket error:", message.error)
+          setError(message.error || "Unknown error")
+          setIsTyping(false)
+          setStreamingState({ content: "", isStreaming: false })
+
+          if (message.error_code === "RATE_LIMIT_EXCEEDED") {
+            toast({
+              title: "Rate limit exceeded",
+              description: "Please wait a moment before sending another message.",
+              variant: "destructive",
+            })
+          }
+          break
+
+        case "pong":
+          // Handle pong response if needed
+          break
+      }
+    },
+    [toast],
+  )
+
+  const handleConnectionChange = useCallback((status: ConnectionStatus) => {
+    setConnectionStatus(status)
+    if (status === "connected") {
+      setError(null)
+    }
+  }, [])
+
+  const handleError = useCallback(
+    (error: string) => {
+      setError(error)
+      toast({
+        title: "Connection Error",
+        description: error,
+        variant: "destructive",
+      })
+    },
+    [toast],
+  )
+
+  const connect = useCallback(async () => {
+    try {
+      const accessToken = apiClient.isAuthenticated() ? localStorage.getItem("access_token") : null
+      if (!accessToken) {
+        throw new Error("No access token available")
+      }
+
+      if (wsClient.current) {
+        wsClient.current.disconnect()
+      }
+
+      wsClient.current = new WebSocketClient(apiClient.getWebSocketUrl(), {
+        onMessage: handleWebSocketMessage,
+        onConnectionChange: handleConnectionChange,
+        onError: handleError,
+      })
+
+      await wsClient.current.connect(accessToken, sessionId)
+    } catch (error) {
+      console.error("[v0] Failed to connect WebSocket:", error)
+      setError(error instanceof Error ? error.message : "Connection failed")
+    }
+  }, [sessionId, handleWebSocketMessage, handleConnectionChange, handleError])
+
+  const sendMessage = useCallback(
+    (content: string) => {
+      if (!wsClient.current || connectionStatus !== "connected") {
+        setError("Not connected to chat service")
+        return
+      }
+
+      // Add user message immediately
+      const userMessage: ChatMessage = {
+        id: `msg-${Date.now()}`,
+        role: "user",
+        content,
+        timestamp: new Date().toISOString(),
+      }
+
+      setMessages((prev) => [...prev, userMessage])
+      setError(null)
+
+      // Send via WebSocket
+      wsClient.current.sendChat(content)
+    },
+    [connectionStatus],
+  )
+
+  const disconnect = useCallback(() => {
+    if (wsClient.current) {
+      wsClient.current.disconnect()
+      wsClient.current = null
+    }
+    setConnectionStatus("disconnected")
+  }, [])
+
+  const getSessionId = useCallback(() => {
+    return wsClient.current?.getSessionId() || sessionId
+  }, [sessionId])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      disconnect()
+    }
+  }, [disconnect])
+
+  return {
+    messages,
+    connectionStatus,
+    isTyping,
+    streamingState,
+    error,
+    connect,
+    sendMessage,
+    disconnect,
+    getSessionId,
+  }
+}
