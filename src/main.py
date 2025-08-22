@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
     """Application lifespan management."""
     # Startup
     settings = get_settings()
-    configure_logging(structured=False)
+    configure_logging()
     
     log_event(
         event="application_startup",
@@ -44,10 +44,7 @@ async def lifespan(app: FastAPI):
         )
     
     yield
-    
-    # Shutdown
     log_event(event="application_shutdown")
-
 
 def create_app() -> FastAPI:
     """Create and configure FastAPI application."""
@@ -149,6 +146,10 @@ def create_app() -> FastAPI:
     @app.exception_handler(Exception)
     async def general_exception_handler(request: Request, exc: Exception):
         """Handle unexpected exceptions."""
+        # Let CancelledError propagate
+        if isinstance(exc, asyncio.CancelledError):
+            raise exc
+            
         request_id = getattr(request.state, 'request_id', 'unknown')
         
         log_event(

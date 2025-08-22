@@ -37,13 +37,6 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 response = await call_next(request)
                 return self._add_response_headers(response, request_id, start_time)
             
-            # Rate limiting
-            client_ip = self._get_client_ip(request)
-            if not await self._check_rate_limit(client_ip, request.url.path):
-                return JSONResponse(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    content={"error": "Rate limit exceeded", "request_id": request_id}
-                )
             
             # Process request
             response = await call_next(request)
@@ -53,6 +46,9 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             
             return self._add_response_headers(response, request_id, start_time)
             
+        except asyncio.CancelledError:
+            # Let cancellation errors propagate
+            raise
         except Exception as e:
             # Log error
             log_therapy_event(
@@ -74,25 +70,6 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             return forwarded.split(",")[0].strip()
         return request.client.host if request.client else "unknown"
     
-    async def _check_rate_limit(self, client_ip: str, path: str) -> bool:
-        """Check rate limiting for client."""
-        try:
-            # Different limits for different endpoints
-            if path.startswith("/api/auth"):
-                limit = self.settings.security.rate_limit_api_per_min
-            elif path.startswith("/ws"):
-                limit = self.settings.security.rate_limit_ws_per_min
-            else:
-                limit = self.settings.security.rate_limit_api_per_min
-            
-            return await rate_limiter.check_rate_limit(
-                key=f"rate_limit:{client_ip}:{path}",
-                limit=limit,
-                window=60  # 1 minute window
-            )
-        except Exception:
-            # If rate limiting fails, allow the request
-            return True
     
     async def _log_request(
         self, 
@@ -221,6 +198,10 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
             # Let FastAPI handle HTTP exceptions
             raise e
             
+        except asyncio.CancelledError:
+            # Let cancellation errors propagate
+            raise
+            
         except Exception as e:
             # Log unexpected errors
             request_id = getattr(request.state, 'request_id', 'unknown')
@@ -262,14 +243,14 @@ async def get_current_user(
         )
 
     auth_service = await get_auth_service()
-    auth_result = await auth_service.get_current_user(credentials.credentials)
+    token = credentials.credentials
+    auth_result = await auth_service.get_current_user(token)
 
     if not auth_result.success:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials"
         )
-
     return auth_result.data
 
 

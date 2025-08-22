@@ -139,7 +139,7 @@ class SupabaseClient:
             
             result = self.client.table("profiles").insert(data).execute()
             
-            if result.error:
+            if getattr(result, "error", None):
                 return QueryResult(data=[], error=str(result.error), success=False)
             
             log_event(
@@ -148,7 +148,7 @@ class SupabaseClient:
                 email=email
             )
             
-            return QueryResult(data=result.data)
+            return QueryResult(data=result.data, success=True, error=None)
             
         except Exception as e:
             log_event(
@@ -166,10 +166,10 @@ class SupabaseClient:
         try:
             result = self.client.table("profiles").select("*").eq("id", user_id).execute()
             
-            if result.error:
+            if getattr(result, "error", None):
                 return QueryResult(data=[], error=str(result.error), success=False)
             
-            return QueryResult(data=result.data)
+            return QueryResult(data=result.data, success=True, error=None)
             
         except Exception as e:
             return QueryResult(data=[], error=str(e), success=False)
@@ -195,7 +195,7 @@ class SupabaseClient:
             
             result = self.client.table("therapy_sessions").insert(data).execute()
             
-            if result.error:
+            if getattr(result, "error", None):
                 return QueryResult(data=[], error=str(result.error), success=False)
             
             log_event(
@@ -204,7 +204,7 @@ class SupabaseClient:
                 session_id=session.session_id
             )
             
-            return QueryResult(data=result.data)
+            return QueryResult(data=result.data, success=True, error=None)
             
         except Exception as e:
             log_event(
@@ -233,7 +233,7 @@ class SupabaseClient:
                 .execute()
             )
             
-            if result.error:
+            if getattr(result, "error", None):
                 return QueryResult(data=[], error=str(result.error), success=False)
             
             log_event(
@@ -291,10 +291,10 @@ class SupabaseClient:
             
             result = self.client.table("memory_logs").insert(data).execute()
             
-            if result.error:
+            if getattr(result, "error", None):
                 return QueryResult(data=[], error=str(result.error), success=False)
             
-            return QueryResult(data=result.data)
+            return QueryResult(data=result.data, success=True, error=None)
             
         except Exception as e:
             log_event(
@@ -323,10 +323,10 @@ class SupabaseClient:
             
             result = query.order("timestamp", desc=True).limit(limit).execute()
             
-            if result.error:
+            if getattr(result, "error", None):
                 return QueryResult(data=[], error=str(result.error), success=False)
             
-            return QueryResult(data=result.data)
+            return QueryResult(data=result.data, success=True, error=None)
             
         except Exception as e:
             return QueryResult(data=[], error=str(e), success=False)
@@ -402,7 +402,7 @@ class SupabaseClient:
                 }
             ).execute()
             
-            if result.error:
+            if getattr(result, "error", None):
                 # Fallback: try legacy function signature without threshold if suggested by PostgREST
                 error_str = str(result.error)
                 if "Could not find the function" in error_str and "match_documents" in error_str:
@@ -414,7 +414,7 @@ class SupabaseClient:
                             "match_count": k,
                         }
                     ).execute()
-                    if fallback.error:
+                    if getattr(fallback, "error", None):
                         log_event(
                             event="vector_search_failed",
                             user_id=user_id,
@@ -484,7 +484,7 @@ class SupabaseClient:
             
             result = self.client.table("crisis_events").insert(data).execute()
             
-            if result.error:
+            if getattr(result, "error", None):
                 return QueryResult(data=[], error=str(result.error), success=False)
             
             log_event(
@@ -530,7 +530,7 @@ class SupabaseClient:
             }
             
             result = self.client.table("security_events").insert(data).execute()
-            return not result.error
+            return not getattr(result, "error", None)
             
         except Exception:
             return False
@@ -557,7 +557,7 @@ class SupabaseClient:
             }
             
             result = self.client.table("performance_metrics").insert(data).execute()
-            return not result.error
+            return not getattr(result, "error", None)
             
         except Exception:
             return False

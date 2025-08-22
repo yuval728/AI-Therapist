@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { apiClient } from "@/lib/api"
 
 interface User {
-  user_id: string
+  id: string
   email: string
 }
 
@@ -48,14 +48,14 @@ export function useAuth() {
     }
   }
 
-  const signup = async (email: string, password: string) => {
+  const signup = async (email: string, password: string, fullName?: string) => {
     try {
       setError(null)
       setLoading(true)
-      const response = await apiClient.signup(email, password)
-      const userData = await apiClient.getCurrentUser()
-      setUser(userData)
-      return response
+      // Backend signup returns success without logging in
+      const result = await apiClient.signup(email, password, fullName)
+      // Do not set user here; prompt user to log in next
+      return result
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Signup failed"
       setError(errorMessage)

@@ -22,24 +22,33 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
+  const [fullName, setFullName] = useState("")
+  const [termsAccepted, setTermsAccepted] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  const [formSuccess, setFormSuccess] = useState<string | null>(null)
 
   const { login, signup } = useAuth()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setFormError(null)
+    setFormSuccess(null)
 
     if (mode === "signup" && password !== confirmPassword) {
       setFormError("Passwords do not match")
       return
     }
 
-    if (password.length < 6) {
-      setFormError("Password must be at least 6 characters")
+    if (password.length < 8) {
+      setFormError("Password must be at least 8 characters")
+      return
+    }
+
+    if (mode === "signup" && !termsAccepted) {
+      setFormError("You must accept the Terms of Service")
       return
     }
 
@@ -48,10 +57,16 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
     try {
       if (mode === "login") {
         await login(email, password)
+        onSuccess()
       } else {
-        await signup(email, password)
+        await signup(email, password, fullName || undefined)
+        // Do not redirect after signup. Switch to login mode and show success message
+        setFormSuccess("Account created successfully. Please sign in.")
+        setPassword("")
+        setConfirmPassword("")
+        setTermsAccepted(false)
+        onToggleMode()
       }
-      onSuccess()
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Authentication failed")
     } finally {
@@ -99,6 +114,23 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
               transition={{ delay: 0.4 }}
             >
               <div className="space-y-4">
+                {mode === "signup" && (
+                  <motion.div
+                    initial={{ x: -20, opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    transition={{ delay: 0.45 }}
+                    className="relative group"
+                  >
+                    <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground transition-colors group-focus-within:text-primary" />
+                    <Input
+                      type="text"
+                      placeholder="Full name (optional)"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      className="pl-10 h-12 glass border-border/50 focus:border-primary/50 transition-all duration-300 focus:shadow-lg focus:shadow-primary/10"
+                    />
+                  </motion.div>
+                )}
                 <motion.div
                   initial={{ x: -20, opacity: 0 }}
                   animate={{ x: 0, opacity: 1 }}
@@ -165,6 +197,22 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
                     </button>
                   </motion.div>
                 )}
+
+                {mode === "signup" && (
+                  <motion.label
+                    initial={{ x: -20, opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    transition={{ delay: 0.75 }}
+                    className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={termsAccepted}
+                      onChange={(e) => setTermsAccepted(e.target.checked)}
+                    />
+                    I accept the Terms of Service
+                  </motion.label>
+                )}
               </div>
 
               {formError && (
@@ -174,6 +222,16 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
                   className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm"
                 >
                   {formError}
+                </motion.div>
+              )}
+
+              {formSuccess && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-3 rounded-lg bg-emerald-600/10 border border-emerald-600/20 text-emerald-600 text-sm"
+                >
+                  {formSuccess}
                 </motion.div>
               )}
 

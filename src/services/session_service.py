@@ -36,15 +36,19 @@ class SessionService:
         try:
             session = TherapySession(
                 user_id=user_id,
-                session_id=str(uuid.uuid4()),
-                emotion=emotion or EmotionType.NEUTRAL,
+                emotion_detected=emotion or EmotionType.NEUTRAL,
                 crisis_level=crisis_level or CrisisLevel.NONE,
-                metadata=metadata or {}
             )
             
             result = await self.supabase_client.create_therapy_session(session)
             
             if not result.success:
+                # Log reason from DB for easier debugging
+                log_therapy_event(
+                    event="session_creation_failed",
+                    user_id=user_id,
+                    error=result.error or "unknown_error"
+                )
                 return APIResponse(
                     success=False,
                     error="Failed to create therapy session",
@@ -54,7 +58,7 @@ class SessionService:
             log_therapy_event(
                 event="session_created",
                 user_id=user_id,
-                session_id=session.session_id
+                session_id=session.id
             )
             
             return APIResponse(
@@ -96,11 +100,10 @@ class SessionService:
             
             session_data = result.data[0]
             session = TherapySession(
+                id=session_data["session_id"],
                 user_id=session_data["user_id"],
-                session_id=session_data["session_id"],
-                emotion=EmotionType(session_data.get("emotion", "neutral")),
-                crisis_level=CrisisLevel(session_data.get("crisis_level", "none")),
-                metadata=session_data.get("metadata", {}),
+                emotion_detected=EmotionType(session_data.get("emotion", "neutral")) if session_data.get("emotion") else EmotionType.NEUTRAL,
+                crisis_level=CrisisLevel(session_data.get("crisis_level", "none")) if session_data.get("crisis_level") else CrisisLevel.NONE,
                 created_at=datetime.fromisoformat(session_data["created_at"].replace('Z', '+00:00')),
                 updated_at=datetime.fromisoformat(session_data["updated_at"].replace('Z', '+00:00'))
             )
@@ -146,11 +149,10 @@ class SessionService:
             sessions = []
             for session_data in result.data:
                 session = TherapySession(
+                    id=session_data["session_id"],
                     user_id=session_data["user_id"],
-                    session_id=session_data["session_id"],
-                    emotion=EmotionType(session_data.get("emotion", "neutral")),
-                    crisis_level=CrisisLevel(session_data.get("crisis_level", "none")),
-                    metadata=session_data.get("metadata", {}),
+                    emotion_detected=EmotionType(session_data.get("emotion", "neutral")) if session_data.get("emotion") else EmotionType.NEUTRAL,
+                    crisis_level=CrisisLevel(session_data.get("crisis_level", "none")) if session_data.get("crisis_level") else CrisisLevel.NONE,
                     created_at=datetime.fromisoformat(session_data["created_at"].replace('Z', '+00:00')),
                     updated_at=datetime.fromisoformat(session_data["updated_at"].replace('Z', '+00:00'))
                 )
@@ -297,12 +299,15 @@ class SessionService:
             
             messages = []
             for msg_data in result.data:
+                # Prefer 'timestamp' column from memory_logs, fallback to 'created_at'
+                ts_raw = msg_data.get("timestamp") or msg_data.get("created_at")
+                ts = datetime.fromisoformat(str(ts_raw).replace('Z', '+00:00')) if ts_raw else datetime.now(timezone.utc)
                 message = SessionMessage(
                     role=msg_data["role"],
                     content=msg_data["content"],
                     message_type=MessageType(msg_data.get("message_type", "user_input")),
                     emotion=EmotionType(msg_data.get("emotion", "neutral")) if msg_data.get("emotion") else None,
-                    timestamp=datetime.fromisoformat(msg_data["created_at"].replace('Z', '+00:00')),
+                    timestamp=ts,
                     metadata=msg_data.get("metadata", {})
                 )
                 messages.append(message)

@@ -91,22 +91,24 @@ class ApiClient {
     }
   }
 
-  async signup(email: string, password: string, name?: string): Promise<AuthTokens> {
+  async signup(email: string, password: string, fullName?: string): Promise<{ success: true; message?: string }> {
     if (isDemoMode) {
       await simulateDelay(800)
-      const mockTokens = {
-        access_token: "demo-access-token-123",
-        refresh_token: "demo-refresh-token-123",
-        user: { ...mockUser, name: name || mockUser.email.split("@")[0] },
-      }
-      this.setTokens(mockTokens)
-      return mockTokens
+      // In demo mode, mimic sign-up success without creating a session
+      return { success: true, message: "Registration successful (demo). Please sign in." }
     }
 
     const response = await fetch(`${API_BASE_URL}/auth/signup`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password, name }),
+      // Backend SignUpRequest requires: email, password, confirm_password, full_name?, terms_accepted
+      body: JSON.stringify({
+        email,
+        password,
+        confirm_password: password,
+        full_name: fullName,
+        terms_accepted: true,
+      }),
     })
 
     if (!response.ok) {
@@ -114,13 +116,13 @@ class ApiClient {
       throw new Error(error.message || "Signup failed")
     }
 
-    const apiResponse: APIResponse<AuthTokens> = await response.json()
+    const apiResponse: APIResponse<any> = await response.json()
     if (!apiResponse.success || !apiResponse.data) {
       throw new Error(apiResponse.message || "Signup failed")
     }
 
-    this.setTokens(apiResponse.data)
-    return apiResponse.data
+    // Signup does not authenticate the user; return success and let UI switch to login
+    return { success: true, message: apiResponse.message }
   }
 
   async signin(email: string, password: string): Promise<AuthTokens> {

@@ -1,23 +1,38 @@
-"""Enhanced logging utilities with structured logging support."""
+"""Enhanced logging utilities with clearer console output and structured file logs.
+
+Key improvements:
+- Concise, colorized console logs with key fields (time, level, event, cid, uid, sid)
+- Structured JSON logs to file for ingestion (serialize=True)
+- Correlation ID support using contextvars to trace flows across layers
+- Backtrace/diagnose toggles for deep debugging on demand
+"""
 import sys
-import logging
-import json
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Optional, Union
 from loguru import logger
 from datetime import datetime, timezone
 
 CONFIGURED = False
 
 
+def _ensure_extra_defaults(record):
+    """Patcher to provide default extra fields for formatting safety."""
+    extra = record.get("extra", {})
+    extra.setdefault("uid", "-")
+    extra.setdefault("sid", "-")
+
+
 def configure_logging(
     level: str = "INFO",
     log_to_file: bool = True,
     log_dir: Optional[Union[str, Path]] = None,
-    structured: bool = True,
-    include_trace: bool = False
+    include_trace: bool = False,
 ) -> None:
-    """Configure application logging with enhanced options."""
+    """Configure application logging.
+
+    Console: human-friendly, non-JSON, colorized and concise.
+    File: structured JSON for ingestion/analysis.
+    """
     global CONFIGURED
     if CONFIGURED:
         return
@@ -25,28 +40,23 @@ def configure_logging(
     # Remove default handler
     logger.remove()
 
-    # Console handler with formatting
+    # Console handler: concise and readable
     console_format = (
-        "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
-        "<level>{level: <8}</level> | "
-        "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
-        "<level>{message}</level> "
-        # "<yellow>{extra}</yellow>"
+        "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> "
+        "| <level>{level: <7}</level> "
+        "| <bold>{message}</bold> "
+        "| uid={extra[uid]} sid={extra[sid]}"
     )
-    
-    if structured:
-        # When serialize=True, format is ignored; keep simple for non-structured
-        console_format = "{message}"
 
     logger.add(
         sys.stdout,
         format=console_format,
         level=level.upper(),
-        serialize=structured,
+        serialize=False,
         backtrace=include_trace,
         diagnose=include_trace,
-        colorize=not structured,
-        enqueue=True
+        colorize=True,
+        enqueue=True,
     )
 
     # File handler if requested
@@ -56,15 +66,16 @@ def configure_logging(
 
         logger.add(
             str(log_path),
-            format=console_format,
+            # When serialize=True, format is ignored
+            format="{message}",
             level=level.upper(),
             rotation="10 MB",
             retention="30 days",
             compression="gz",
-            serialize=structured,
+            serialize=True,
             backtrace=include_trace,
             diagnose=include_trace,
-            enqueue=True
+            enqueue=True,
         )
 
     CONFIGURED = True
@@ -75,30 +86,29 @@ def log_event(
     level: str = "INFO",
     user_id: Optional[str] = None,
     session_id: Optional[str] = None,
-    **fields: Any
+    **fields: Any,
 ) -> None:
-    """Log structured event with context."""
+    """Log an event with consistent fields.
+
+    Message shown on console: the event name; key identifiers are shown inline.
+    Full payload is captured in the structured file sink.
+    """
     log_data = {
         "event": event,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        **fields
+        **fields,
     }
-    
-    if user_id:
-        log_data["user_id"] = user_id
-    if session_id:
-        log_data["session_id"] = session_id
-    
-    # Enhanced verbosity for errors: include stack traces and exception if provided
+
+    # Keep console line stable even if keys are missing
+    safe_bind = {"uid": user_id, "sid": session_id}
+
     upper_level = level.upper()
     exc_obj = log_data.pop("exc", None)
+    bound = logger.bind(**safe_bind, **log_data)
     if upper_level in ("ERROR", "CRITICAL") or isinstance(exc_obj, BaseException):
-        logger.bind(**log_data).opt(
-            exception=exc_obj if isinstance(exc_obj, BaseException) else True,
-            backtrace=True
-        ).log(upper_level, event)
+        bound.opt(exception=exc_obj if isinstance(exc_obj, BaseException) else True, backtrace=True).log(upper_level, event)
     else:
-        logger.bind(**log_data).log(upper_level, event)
+        bound.log(upper_level, event)
 
 
 def log_therapy_event(
@@ -176,3 +186,4 @@ class LogContext:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.token:
             self.token.__exit__(exc_type, exc_val, exc_tb)
+

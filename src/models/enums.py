@@ -42,6 +42,7 @@ class EmotionType(str, Enum):
 
 class CrisisLevel(str, Enum):
     """Crisis severity levels."""
+    NONE = "none"
     LOW = "low"
     MODERATE = "moderate"
     HIGH = "high"

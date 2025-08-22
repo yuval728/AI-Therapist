@@ -2,7 +2,6 @@
 
 from .supabase_client import (
     SupabaseClient,
-    DatabaseConfig,
     QueryResult,
     get_supabase_client,
     supabase_session
@@ -10,7 +9,6 @@ from .supabase_client import (
 
 __all__ = [
     "SupabaseClient",
-    "DatabaseConfig", 
     "QueryResult",
     "get_supabase_client",
     "supabase_session"

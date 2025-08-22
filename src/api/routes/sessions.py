@@ -50,7 +50,9 @@ async def list_sessions(
     session_service = await get_session_service()
     user_id = current_user["user"]["id"]
     
-    pagination = PaginationParams(offset=offset, limit=limit)
+    # Convert offset-based pagination to page-based PaginationParams
+    page = (offset // limit) + 1 if limit > 0 else 1
+    pagination = PaginationParams(page=page, limit=limit)
     result = await session_service.list_user_sessions(user_id, pagination)
     
     if not result.success:
@@ -134,7 +136,8 @@ async def get_session_messages(
     session_service = await get_session_service()
     user_id = current_user["user"]["id"]
     
-    pagination = PaginationParams(offset=offset, limit=limit)
+    page = (offset // limit) + 1 if limit > 0 else 1
+    pagination = PaginationParams(page=page, limit=limit)
     result = await session_service.get_session_messages(user_id, session_id, pagination)
     
     if not result.success:

@@ -28,8 +28,10 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className={`${geist.variable} ${manrope.variable} antialiased`}>
-      <body className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/20">{children}</body>
+    <html lang="en" className={`${geist.variable} ${manrope.variable} antialiased`} suppressHydrationWarning>
+      <body className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/20" suppressHydrationWarning>
+        {children}
+      </body>
     </html>
   )
 }

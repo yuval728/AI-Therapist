@@ -100,7 +100,8 @@ async def chat_websocket(websocket: WebSocket):
             if not session_result.success:
                 await websocket.close(code=status.WS_1011_INTERNAL_ERROR, reason="Session creation failed")
                 return
-            session_id = session_result.data.session_id
+            # The model uses `id` as the identifier; DB stores it in `session_id`
+            session_id = session_result.data.id
         
         # Connect to manager
         await manager.connect(websocket, user_id, session_id)
@@ -167,17 +168,6 @@ async def handle_therapy_message(user_id: str, session_id: str, message: Dict[st
             await manager.send_error(user_id, "Message content cannot be empty", "EMPTY_MESSAGE")
             return
         
-        # Rate limiting check
-        settings = get_settings()
-        rate_limit_key = f"ws_rate_limit:{user_id}"
-        
-        if not await rate_limiter.check_rate_limit(
-            key=rate_limit_key,
-            limit=settings.security.rate_limit_ws_per_min,
-            window=60
-        ):
-            await manager.send_error(user_id, "Rate limit exceeded. Please slow down.", "RATE_LIMIT_EXCEEDED")
-            return
         
         # Send typing indicator
         await manager.send_message(user_id, {
