@@ -1,12 +1,12 @@
 """Session management service layer."""
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import uuid
 
 from src.database import get_supabase_client
 from src.models import (
-    TherapySession, SessionMessage, EmotionType, CrisisLevel, 
-    MessageType, APIResponse, PaginationParams
+    TherapySession, SessionMessage, EmotionType, CrisisLevel,
+    MessageType, APIResponse, PaginationParams, ProcessingStatus
 )
 from src.utils import log_therapy_event, timing_decorator
 
@@ -34,10 +34,55 @@ class SessionService:
         await self._ensure_initialized()
         
         try:
+            # Idempotency: return the most recent session if it was just created
+            # within a short window to avoid duplicates from rapid repeated calls.
+            idempotency_window_seconds = 45
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=idempotency_window_seconds)
+            try:
+                recent = (
+                    self.supabase_client.client.table("therapy_sessions")
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .gte("created_at", cutoff.isoformat())
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if recent and getattr(recent, "data", None):
+                    session_data = recent.data[0]
+                    existing = TherapySession(
+                        id=session_data["session_id"],
+                        user_id=session_data["user_id"],
+                        emotion_detected=EmotionType(session_data.get("emotion", "neutral")) if session_data.get("emotion") else None,
+                        emotion_confidence=session_data.get("emotion_confidence"),
+                        crisis_level=CrisisLevel(session_data.get("crisis_level", "none")) if session_data.get("crisis_level") else None,
+                        summary=session_data.get("session_summary"),
+                        metadata=session_data.get("metadata", {}),
+                        processing_status=ProcessingStatus(session_data.get("processing_status", "pending")),
+                        ended_at=datetime.fromisoformat(str(session_data.get("ended_at")).replace('Z', '+00:00')) if session_data.get("ended_at") else None,
+                        created_at=datetime.fromisoformat(session_data["created_at"].replace('Z', '+00:00')),
+                        updated_at=datetime.fromisoformat(session_data["updated_at"].replace('Z', '+00:00')),
+                    )
+                    log_therapy_event(
+                        event="session_idempotent_return",
+                        user_id=user_id,
+                        session_id=existing.id,
+                        metadata={"window_seconds": idempotency_window_seconds}
+                    )
+                    return APIResponse(
+                        success=True,
+                        data=existing,
+                        message="Existing recent session returned"
+                    )
+            except Exception:
+                # Non-fatal: fall back to creating a new session if the lookup fails
+                pass
+
             session = TherapySession(
                 user_id=user_id,
                 emotion_detected=emotion or EmotionType.NEUTRAL,
                 crisis_level=crisis_level or CrisisLevel.NONE,
+                metadata=metadata or {},
             )
             
             result = await self.supabase_client.create_therapy_session(session)
@@ -85,7 +130,7 @@ class SessionService:
         await self._ensure_initialized()
         
         try:
-            result = await self.supabase_client.client.table("therapy_sessions")\
+            result = self.supabase_client.client.table("therapy_sessions")\
                 .select("*")\
                 .eq("user_id", user_id)\
                 .eq("session_id", session_id)\
@@ -102,8 +147,13 @@ class SessionService:
             session = TherapySession(
                 id=session_data["session_id"],
                 user_id=session_data["user_id"],
-                emotion_detected=EmotionType(session_data.get("emotion", "neutral")) if session_data.get("emotion") else EmotionType.NEUTRAL,
-                crisis_level=CrisisLevel(session_data.get("crisis_level", "none")) if session_data.get("crisis_level") else CrisisLevel.NONE,
+                emotion_detected=EmotionType(session_data.get("emotion", "neutral")) if session_data.get("emotion") else None,
+                emotion_confidence=session_data.get("emotion_confidence"),
+                crisis_level=CrisisLevel(session_data.get("crisis_level", "none")) if session_data.get("crisis_level") else None,
+                summary=session_data.get("session_summary"),
+                metadata=session_data.get("metadata", {}),
+                processing_status=ProcessingStatus(session_data.get("processing_status", "pending")),
+                ended_at=datetime.fromisoformat(str(session_data.get("ended_at")).replace('Z', '+00:00')) if session_data.get("ended_at") else None,
                 created_at=datetime.fromisoformat(session_data["created_at"].replace('Z', '+00:00')),
                 updated_at=datetime.fromisoformat(session_data["updated_at"].replace('Z', '+00:00'))
             )
@@ -144,15 +194,20 @@ class SessionService:
                 .order("created_at", desc=True)\
                 .range(pagination.offset, pagination.offset + pagination.limit - 1)
             
-            result = await query.execute()
+            result = query.execute()
             
             sessions = []
             for session_data in result.data:
                 session = TherapySession(
                     id=session_data["session_id"],
                     user_id=session_data["user_id"],
-                    emotion_detected=EmotionType(session_data.get("emotion", "neutral")) if session_data.get("emotion") else EmotionType.NEUTRAL,
-                    crisis_level=CrisisLevel(session_data.get("crisis_level", "none")) if session_data.get("crisis_level") else CrisisLevel.NONE,
+                    emotion_detected=EmotionType(session_data.get("emotion", "neutral")) if session_data.get("emotion") else None,
+                    emotion_confidence=session_data.get("emotion_confidence"),
+                    crisis_level=CrisisLevel(session_data.get("crisis_level", "none")) if session_data.get("crisis_level") else None,
+                    summary=session_data.get("session_summary"),
+                    metadata=session_data.get("metadata", {}),
+                    processing_status=ProcessingStatus(session_data.get("processing_status", "pending")),
+                    ended_at=datetime.fromisoformat(str(session_data.get("ended_at")).replace('Z', '+00:00')) if session_data.get("ended_at") else None,
                     created_at=datetime.fromisoformat(session_data["created_at"].replace('Z', '+00:00')),
                     updated_at=datetime.fromisoformat(session_data["updated_at"].replace('Z', '+00:00'))
                 )
@@ -191,8 +246,16 @@ class SessionService:
         await self._ensure_initialized()
         
         try:
-            # Validate updates
-            allowed_fields = {"emotion", "crisis_level", "metadata", "ended_at"}
+            # Validate updates (use DB column names)
+            allowed_fields = {
+                "emotion",
+                "emotion_confidence",
+                "crisis_level",
+                "processing_status",
+                "session_summary",
+                "metadata",
+                "ended_at",
+            }
             invalid_fields = set(updates.keys()) - allowed_fields
             
             if invalid_fields:
@@ -201,13 +264,40 @@ class SessionService:
                     error=f"Invalid fields: {', '.join(invalid_fields)}",
                     error_code="VALIDATION_ERROR"
                 )
-            
-            # Add timestamp
-            updates["updated_at"] = datetime.now(timezone.utc).isoformat()
-            
+
+            # Normalize enums and values to match DB
+            normalized: Dict[str, Any] = {}
+            for k, v in updates.items():
+                if k == "emotion":
+                    if isinstance(v, EmotionType):
+                        normalized[k] = v.value
+                    else:
+                        normalized[k] = v
+                elif k == "crisis_level":
+                    # Map NONE to NULL for DB constraint
+                    if isinstance(v, CrisisLevel):
+                        normalized[k] = None if v == CrisisLevel.NONE else v.value
+                    else:
+                        normalized[k] = None if str(v).lower() == "none" else v
+                elif k == "processing_status":
+                    if isinstance(v, ProcessingStatus):
+                        normalized[k] = v.value
+                    else:
+                        # Validate against enum values
+                        try:
+                            normalized[k] = ProcessingStatus(str(v)).value
+                        except Exception:
+                            return APIResponse(
+                                success=False,
+                                error="Invalid processing_status",
+                                error_code="VALIDATION_ERROR"
+                            )
+                else:
+                    normalized[k] = v
+
             # Update in database
-            result = await self.supabase_client.client.table("therapy_sessions")\
-                .update(updates)\
+            result = self.supabase_client.client.table("therapy_sessions")\
+                .update(normalized)\
                 .eq("user_id", user_id)\
                 .eq("session_id", session_id)\
                 .execute()
@@ -286,8 +376,7 @@ class SessionService:
             result = await self.supabase_client.get_memory_logs(
                 user_id=user_id,
                 session_id=session_id,
-                limit=pagination.limit,
-                offset=pagination.offset
+                limit=pagination.limit
             )
             
             if not result.success:
@@ -393,14 +482,14 @@ class SessionService:
                 return session_result
             
             # Get message count
-            messages_result = await self.supabase_client.client.table("memory_logs")\
+            messages_result = self.supabase_client.client.table("memory_logs")\
                 .select("count", count="exact")\
                 .eq("user_id", user_id)\
                 .eq("session_id", session_id)\
                 .execute()
             
             # Get crisis events for this session
-            crisis_result = await self.supabase_client.client.table("crisis_events")\
+            crisis_result = self.supabase_client.client.table("crisis_events")\
                 .select("*")\
                 .eq("user_id", user_id)\
                 .eq("session_id", session_id)\
@@ -408,16 +497,19 @@ class SessionService:
             
             session = session_result.data
             summary = {
-                "session_id": session.session_id,
-                "emotion": session.emotion.value,
-                "crisis_level": session.crisis_level.value,
-                "created_at": session.created_at.isoformat(),
-                "updated_at": session.updated_at.isoformat(),
+                "session_id": session.id,
+                "emotion": session.emotion_detected.value if session.emotion_detected else None,
+                "emotion_confidence": session.emotion_confidence,
+                "crisis_level": session.crisis_level.value if session.crisis_level else None,
+                "created_at": session.created_at.isoformat() if session.created_at else None,
+                "updated_at": session.updated_at.isoformat() if session.updated_at else None,
                 "ended_at": session.ended_at.isoformat() if session.ended_at else None,
                 "message_count": messages_result.count if messages_result else 0,
                 "crisis_events": len(crisis_result.data) if crisis_result else 0,
                 "duration_minutes": None,
-                "metadata": session.metadata
+                "metadata": session.metadata,
+                "processing_status": session.processing_status.value if session.processing_status else None,
+                "summary": session.summary,
             }
             
             # Calculate duration if session ended

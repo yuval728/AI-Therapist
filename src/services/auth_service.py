@@ -41,14 +41,15 @@ class AuthService:
             auth_result = await self.supabase_auth.sign_up(request)
             print(auth_result)
             if not auth_result.success:
+                error_msg = auth_result.error or "Registration failed"
                 log_therapy_event(
                     event="signup_failed",
                     email=request.email,
-                    error=auth_result.error
+                    error=error_msg
                 )
                 return APIResponse(
                     success=False,
-                    error=auth_result.error or "Registration failed",
+                    error=error_msg,
                     error_code="SIGNUP_FAILED"
                 )
             
@@ -106,14 +107,15 @@ class AuthService:
             auth_result = await self.supabase_auth.sign_in(request)
             
             if not auth_result.success:
+                error_msg = auth_result.error or "Invalid credentials"
                 log_therapy_event(
                     event="signin_failed",
                     email=request.email,
-                    error=auth_result.error
+                    error=error_msg
                 )
                 return APIResponse(
                     success=False,
-                    error=auth_result.error or "Invalid credentials",
+                    error=error_msg,
                     error_code="SIGNIN_FAILED"
                 )
             
@@ -170,9 +172,10 @@ class AuthService:
             auth_result = await self.supabase_auth.oauth_sign_in(request)
             
             if not auth_result.success:
+                error_msg = auth_result.error or "OAuth authentication failed"
                 return APIResponse(
                     success=False,
-                    error=auth_result.error or "OAuth authentication failed",
+                    error=error_msg,
                     error_code="OAUTH_FAILED"
                 )
             
@@ -203,9 +206,10 @@ class AuthService:
             auth_result = await self.supabase_auth.sign_out(user_id)
             
             if not auth_result.success:
+                error_msg = auth_result.error or "Logout failed"
                 return APIResponse(
                     success=False,
-                    error=auth_result.error or "Logout failed",
+                    error=error_msg,
                     error_code="SIGNOUT_FAILED"
                 )
             
@@ -235,9 +239,10 @@ class AuthService:
             auth_result = await self.supabase_auth.refresh_session(refresh_token)
             
             if not auth_result.success:
+                error_msg = auth_result.error or "Token refresh failed"
                 return APIResponse(
                     success=False,
-                    error=auth_result.error or "Token refresh failed",
+                    error=error_msg,
                     error_code="REFRESH_FAILED"
                 )
             
@@ -279,9 +284,10 @@ class AuthService:
             auth_result = await self.supabase_auth.get_current_user(access_token)
             
             if not auth_result.success:
+                error_msg = auth_result.error or "Invalid token"
                 return APIResponse(
                     success=False,
-                    error=auth_result.error or "Invalid token",
+                    error=error_msg,
                     error_code="INVALID_TOKEN"
                 )
             
@@ -321,9 +327,10 @@ class AuthService:
             auth_result = await self.supabase_auth.reset_password(email)
             
             if not auth_result.success:
+                error_msg = auth_result.error or "Password reset failed"
                 return APIResponse(
                     success=False,
-                    error=auth_result.error or "Password reset failed",
+                    error=error_msg,
                     error_code="RESET_FAILED"
                 )
             

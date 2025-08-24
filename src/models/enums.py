@@ -60,10 +60,9 @@ class MessageType(str, Enum):
 class ProcessingStatus(str, Enum):
     """Status of message or session processing."""
     PENDING = "pending"
-    PROCESSING = "processing"
+    IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
-    BLOCKED = "blocked"
 
 
 class UserRole(str, Enum):

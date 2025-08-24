@@ -33,7 +33,18 @@ export function useSessionManagement() {
 
         setState((prev) => ({
           ...prev,
-          sessions: append ? [...prev.sessions, ...sessions] : sessions,
+          sessions: (() => {
+            const incoming = append ? [...prev.sessions, ...sessions] : sessions
+            const seen = new Set<string>()
+            const deduped: TherapySession[] = []
+            for (const s of incoming) {
+              if (!seen.has(s.id)) {
+                seen.add(s.id)
+                deduped.push(s)
+              }
+            }
+            return deduped
+          })(),
           hasMore: sessions.length === limit,
           loading: false,
         }))
@@ -74,7 +85,10 @@ export function useSessionManagement() {
 
         setState((prev) => ({
           ...prev,
-          sessions: [newSession, ...prev.sessions],
+          sessions: [
+            newSession,
+            ...prev.sessions.filter((s) => s.id !== newSession.id),
+          ],
           activeSessionId: newSession.id,
           loading: false,
         }))

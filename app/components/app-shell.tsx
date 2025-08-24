@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -65,6 +65,9 @@ export function AppShell() {
     initializeSessions()
   }, [initializeSessions])
 
+  // Guard to prevent duplicate initial session creation under React Strict Mode
+  const createdInitialSessionRef = useRef(false)
+
   // Connect WebSocket when active session changes
   useEffect(() => {
     if (activeSessionId) {
@@ -78,7 +81,8 @@ export function AppShell() {
 
   // Create initial session if none exists
   useEffect(() => {
-    if (!sessionsLoading && sessions.length === 0 && !activeSessionId) {
+    if (!sessionsLoading && sessions.length === 0 && !activeSessionId && !createdInitialSessionRef.current) {
+      createdInitialSessionRef.current = true
       handleNewSession()
     }
   }, [sessionsLoading, sessions.length, activeSessionId])
@@ -184,7 +188,7 @@ export function AppShell() {
                 <DropdownMenuContent className="w-56" align="end" forceMount>
                   <div className="flex items-center justify-start gap-2 p-2">
                     <div className="flex flex-col space-y-1 leading-none">
-                      <p className="font-medium">{user?.name || user?.email?.split("@")[0]}</p>
+                      <p className="font-medium">{user?.email?.split("@")[0]}</p>
                       <p className="w-[200px] truncate text-sm text-muted-foreground">{user?.email}</p>
                     </div>
                   </div>

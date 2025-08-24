@@ -182,15 +182,26 @@ class SupabaseClient:
         self._ensure_initialized()
         
         try:
+            # Convert enums to plain values for persistence
+            emotion_value = (
+                session.emotion_detected.value if session.emotion_detected else None
+            )
+            crisis_value = (
+                session.crisis_level.value if (session.crisis_level and session.crisis_level.value != "none") else None
+            )
+            processing_value = (
+                session.processing_status.value if getattr(session, "processing_status", None) else "pending"
+            )
+
             data = {
                 "user_id": session.user_id,
-                "session_id": session.session_id,
-                "emotion": session.emotion.value if session.emotion else None,
+                "session_id": session.id,
+                "emotion": emotion_value,
                 "emotion_confidence": session.emotion_confidence,
-                "crisis_level": session.crisis_level.value if session.crisis_level else None,
-                "processing_status": session.processing_status.value if session.processing_status else "pending",
-                "session_summary": session.session_summary,
-                "metadata": session.metadata or {}
+                "crisis_level": crisis_value,
+                "processing_status": processing_value,
+                "session_summary": session.summary,
+                "metadata": session.metadata,
             }
             
             result = self.client.table("therapy_sessions").insert(data).execute()
@@ -201,7 +212,7 @@ class SupabaseClient:
             log_event(
                 event="therapy_session_created",
                 user_id=session.user_id,
-                session_id=session.session_id
+                session_id=session.id
             )
             
             return QueryResult(data=result.data, success=True, error=None)

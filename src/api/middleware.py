@@ -19,7 +19,18 @@ class SecurityMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, exclude_paths: Optional[list] = None):
         super().__init__(app)
         self.exclude_paths = exclude_paths or [
-            "/docs", "/redoc", "/openapi.json", "/health", "/metrics"
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+            # Health (both root and API-prefixed)
+            "/health",
+            "/api/health",
+            "/api/health/detailed",
+            "/api/health/metrics",
+            "/api/health/readiness",
+            "/api/health/liveness",
+            # WebSocket base (handshake typically bypasses HTTP middleware, but safe to exclude)
+            "/ws"
         ]
         self.settings = get_settings()
     

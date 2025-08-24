@@ -1,13 +1,13 @@
 """State models for therapy session management."""
-from typing import TypedDict, List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from langchain_core.messages import BaseMessage
 from .base import BaseEntity, TimestampMixin
-from .enums import AttackType, SessionMode, EmotionType, CrisisLevel
+from .enums import AttackType, SessionMode, EmotionType, CrisisLevel, ProcessingStatus
 
 
-class TherapyState(TypedDict):
+class TherapyState(BaseModel):
     """Core state for therapy graph execution."""
     user_id: str
     session_id: str
@@ -38,10 +38,12 @@ class TherapySession(BaseEntity):
     duration_seconds: Optional[int] = Field(None, ge=0)
     summary: Optional[str] = Field(None, max_length=1000)
     tags: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    processing_status: ProcessingStatus = Field(default=ProcessingStatus.PENDING)
     is_active: bool = True
     ended_at: Optional[datetime] = None
     
-    @validator('emotion_confidence')
+    @field_validator('emotion_confidence')
     def validate_emotion_confidence(cls, v, values):
         if v is not None and 'emotion_detected' not in values:
             raise ValueError('emotion_confidence requires emotion_detected')
@@ -98,7 +100,7 @@ class JournalEntry(BaseEntity):
     is_private: bool = True
     word_count: int = Field(default=0, ge=0)
     
-    @validator('word_count', always=True)
+    @field_validator('word_count', mode="before")
     def calculate_word_count(cls, v, values):
         if 'content' in values:
             return len(values['content'].split())

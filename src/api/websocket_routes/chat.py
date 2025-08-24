@@ -25,8 +25,7 @@ class ConnectionManager:
         self.user_sessions: Dict[str, str] = {}  # user_id -> session_id
     
     async def connect(self, websocket: WebSocket, user_id: str, session_id: str):
-        """Accept WebSocket connection."""
-        await websocket.accept()
+        """Register WebSocket connection (assumes already accepted)."""
         self.active_connections[user_id] = websocket
         self.user_sessions[user_id] = session_id
         
@@ -74,12 +73,22 @@ async def chat_websocket(websocket: WebSocket):
     session_id = None
     
     try:
+        # Accept the connection before receiving any messages
+        await websocket.accept()
+
         # Wait for authentication message
         auth_data = await websocket.receive_json()
         access_token = auth_data.get("access_token")
         session_id = auth_data.get("session_id")
         
         if not access_token:
+            # Inform client then close
+            await websocket.send_json({
+                "type": "error",
+                "error": "Missing access token",
+                "error_code": "MISSING_TOKEN",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing access token")
             return
         
@@ -88,6 +97,12 @@ async def chat_websocket(websocket: WebSocket):
         auth_result = await auth_service.get_current_user(access_token)
         
         if not auth_result.success:
+            await websocket.send_json({
+                "type": "error",
+                "error": "Invalid token",
+                "error_code": "INVALID_TOKEN",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token")
             return
         

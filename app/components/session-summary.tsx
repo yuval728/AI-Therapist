@@ -14,12 +14,12 @@ interface SessionSummaryData {
   session_id: string
   duration_minutes: number
   message_count: number
-  primary_emotions: string[]
-  key_topics: string[]
-  insights: string[]
-  recommendations: string[]
+  primary_emotions?: string[]
+  key_topics?: string[]
+  insights?: string[]
+  recommendations?: string[]
   crisis_level: number
-  improvement_indicators: string[]
+  improvement_indicators?: string[]
 }
 
 interface SessionSummaryProps {
@@ -157,7 +157,7 @@ export function SessionSummary({ sessionId }: SessionSummaryProps) {
         </motion.div>
 
         {/* Primary Emotions */}
-        {summary.primary_emotions.length > 0 && (
+        {(summary.primary_emotions?.length ?? 0) > 0 && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
             <Card className="glass border-border/30">
               <CardHeader className="pb-3">
@@ -165,7 +165,7 @@ export function SessionSummary({ sessionId }: SessionSummaryProps) {
               </CardHeader>
               <CardContent>
                 <div className="flex flex-wrap gap-2">
-                  {summary.primary_emotions.map((emotion, index) => (
+                  {(summary.primary_emotions ?? []).map((emotion, index) => (
                     <motion.div
                       key={emotion}
                       initial={{ scale: 0 }}
@@ -184,7 +184,7 @@ export function SessionSummary({ sessionId }: SessionSummaryProps) {
         )}
 
         {/* Key Topics */}
-        {summary.key_topics.length > 0 && (
+        {(summary.key_topics?.length ?? 0) > 0 && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
             <Card className="glass border-border/30">
               <CardHeader className="pb-3">
@@ -195,7 +195,7 @@ export function SessionSummary({ sessionId }: SessionSummaryProps) {
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  {summary.key_topics.map((topic, index) => (
+                  {(summary.key_topics ?? []).map((topic, index) => (
                     <motion.div
                       key={index}
                       initial={{ opacity: 0, x: -10 }}
@@ -214,7 +214,7 @@ export function SessionSummary({ sessionId }: SessionSummaryProps) {
         )}
 
         {/* Insights */}
-        {summary.insights.length > 0 && (
+        {(summary.insights?.length ?? 0) > 0 && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
             <Card className="glass border-border/30">
               <CardHeader className="pb-3">
@@ -225,7 +225,7 @@ export function SessionSummary({ sessionId }: SessionSummaryProps) {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {summary.insights.map((insight, index) => (
+                  {(summary.insights ?? []).map((insight, index) => (
                     <motion.div
                       key={index}
                       initial={{ opacity: 0, y: 5 }}
@@ -243,7 +243,7 @@ export function SessionSummary({ sessionId }: SessionSummaryProps) {
         )}
 
         {/* Recommendations */}
-        {summary.recommendations.length > 0 && (
+        {(summary.recommendations?.length ?? 0) > 0 && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
             <Card className="glass border-border/30">
               <CardHeader className="pb-3">
@@ -254,7 +254,7 @@ export function SessionSummary({ sessionId }: SessionSummaryProps) {
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  {summary.recommendations.map((recommendation, index) => (
+                  {(summary.recommendations ?? []).map((recommendation, index) => (
                     <motion.div
                       key={index}
                       initial={{ opacity: 0, x: -10 }}
@@ -273,7 +273,7 @@ export function SessionSummary({ sessionId }: SessionSummaryProps) {
         )}
 
         {/* Improvement Indicators */}
-        {summary.improvement_indicators.length > 0 && (
+        {(summary.improvement_indicators?.length ?? 0) > 0 && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}>
             <Card className="glass border-border/30">
               <CardHeader className="pb-3">
@@ -284,7 +284,7 @@ export function SessionSummary({ sessionId }: SessionSummaryProps) {
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  {summary.improvement_indicators.map((indicator, index) => (
+                  {(summary.improvement_indicators ?? []).map((indicator, index) => (
                     <motion.div
                       key={index}
                       initial={{ opacity: 0, x: -10 }}

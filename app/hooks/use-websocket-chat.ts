@@ -38,6 +38,7 @@ export function useWebSocketChat(sessionId?: string) {
   const [error, setError] = useState<string | null>(null)
 
   const wsClient = useRef<WebSocketClient | null>(null)
+  const connectingRef = useRef(false)
   const { toast } = useToast()
 
   const handleWebSocketMessage = useCallback(
@@ -135,6 +136,18 @@ export function useWebSocketChat(sessionId?: string) {
 
   const connect = useCallback(async () => {
     try {
+      if (connectingRef.current) {
+        // Avoid parallel connects
+        return
+      }
+
+      // Skip if already connected or connecting
+      const status = wsClient.current?.getConnectionStatus()
+      if (status === "connected" || status === "connecting") {
+        return
+      }
+
+      connectingRef.current = true
       const accessToken = apiClient.isAuthenticated() ? localStorage.getItem("access_token") : null
       if (!accessToken) {
         throw new Error("No access token available")
@@ -151,9 +164,11 @@ export function useWebSocketChat(sessionId?: string) {
       })
 
       await wsClient.current.connect(accessToken, sessionId)
+      connectingRef.current = false
     } catch (error) {
       console.error("[v0] Failed to connect WebSocket:", error)
       setError(error instanceof Error ? error.message : "Connection failed")
+      connectingRef.current = false
     }
   }, [sessionId, handleWebSocketMessage, handleConnectionChange, handleError])
 
@@ -186,6 +201,7 @@ export function useWebSocketChat(sessionId?: string) {
       wsClient.current.disconnect()
       wsClient.current = null
     }
+    connectingRef.current = false
     setConnectionStatus("disconnected")
   }, [])
 
