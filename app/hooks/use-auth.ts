@@ -15,6 +15,32 @@ export function useAuth() {
 
   useEffect(() => {
     checkAuth()
+
+    // React to explicit logout events dispatched by apiClient.removeTokens()
+    const handleAuthLogout = () => {
+      setUser(null)
+      setError(null)
+    }
+
+    // React to storage changes (e.g., other tabs or backend-triggered removals)
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "access_token" && !e.newValue) {
+        setUser(null)
+        setError(null)
+      }
+    }
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("auth:logout", handleAuthLogout)
+      window.addEventListener("storage", handleStorage)
+    }
+
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("auth:logout", handleAuthLogout)
+        window.removeEventListener("storage", handleStorage)
+      }
+    }
   }, [])
 
   const checkAuth = async () => {
@@ -79,5 +105,6 @@ export function useAuth() {
     signup,
     logout,
     isAuthenticated: !!user,
+    refresh: checkAuth,
   }
 }

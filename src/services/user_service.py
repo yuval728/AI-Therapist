@@ -85,17 +85,32 @@ class UserService:
             updates["updated_at"] = datetime.now(timezone.utc).isoformat()
             
             # Update in database
-            result = await self.supabase_client.client.table("profiles").update(updates).eq("id", user_id).execute()
-            
-            if result.error:
+            result = self.supabase_client.client.table("profiles").update(updates).eq("id", user_id).execute()
+
+            # Handle update error from Supabase
+            if getattr(result, "error", None):
                 return APIResponse(
                     success=False,
                     error="Failed to update profile",
                     error_code="UPDATE_FAILED"
                 )
-            
-            # Get updated profile
-            return await self.get_user_profile(user_id)
+
+            # Normalize to User model
+            updated = result.data[0] if result and getattr(result, "data", None) else None
+            if not updated:
+                # Fallback: refetch the profile to return a proper User
+                return await self.get_user_profile(user_id)
+
+            profile = User(
+                id=updated["id"],
+                email=updated["email"],
+                full_name=updated.get("full_name"),
+                preferences=updated.get("preferences", {}),
+                created_at=datetime.fromisoformat(updated["created_at"].replace('Z', '+00:00')),
+                updated_at=datetime.fromisoformat(updated["updated_at"].replace('Z', '+00:00')),
+            )
+
+            return APIResponse(success=True, data=profile)
             
         except Exception as e:
             log_therapy_event(
@@ -270,10 +285,19 @@ class UserService:
             ]
             
             for table in tables_to_clean:
-                await self.supabase_client.client.table(table)\
-                    .delete()\
-                    .eq("user_id", user_id)\
-                    .execute()
+                if table == "profiles":
+                    self.supabase_client.client.table(table)\
+                        .delete()\
+                        .eq("id", user_id)\
+                        .execute()
+                else:
+                    self.supabase_client.client.table(table)\
+                        .delete()\
+                        .eq("user_id", user_id)\
+                        .execute()
+
+            ## TODO: Delete user from Supabase
+            # self.supabase_client.client.auth.admin.delete_user(user_id)
             
             log_therapy_event(
                 event="user_account_deleted",

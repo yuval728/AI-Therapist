@@ -21,7 +21,7 @@ interface AuthTokens {
 interface User {
   id: string
   email: string
-  name?: string
+  full_name?: string
   created_at?: string
 }
 
@@ -88,6 +88,12 @@ class ApiClient {
       localStorage.removeItem("refresh_token")
       localStorage.removeItem("user")
       document.cookie = "access_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT"
+      // Notify listeners (e.g., useAuth) that auth tokens were cleared
+      try {
+        window.dispatchEvent(new Event("auth:logout"))
+      } catch {
+        // no-op: event dispatch might fail in non-browser envs
+      }
     }
   }
 
@@ -450,38 +456,62 @@ class ApiClient {
       await simulateDelay(300)
       return {
         ...mockUser,
-        name: "Demo User",
+        full_name: "Demo User",
         created_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
       }
     }
 
     const response = await this.fetchWithAuth(`${API_BASE_URL}/users/profile`)
-    const apiResponse: APIResponse<User> = await response.json()
+    const apiResponse: APIResponse<any> = await response.json()
 
     if (!apiResponse.success || !apiResponse.data) {
       throw new Error(apiResponse.message || "Failed to get user profile")
     }
 
-    return apiResponse.data
+    // Backend returns { id, email, full_name, preferences, created_at, updated_at }
+    const data = apiResponse.data
+    const mapped: User = {
+      id: data.id,
+      email: data.email,
+      full_name: data.full_name,
+      created_at: data.created_at,
+    }
+    return mapped
   }
 
-  async updateUserProfile(updates: Partial<User>): Promise<User> {
+  async updateUserProfile(updates: Partial<User> & { preferences?: Record<string, any> }): Promise<User> {
     if (isDemoMode) {
       await simulateDelay(500)
       return { ...mockUser, ...updates }
     }
 
+    // Only send allowed fields to backend: full_name, preferences
+    const payload: Record<string, any> = {}
+    if (typeof updates.full_name === "string" && updates.full_name.trim().length > 0) {
+      payload.full_name = updates.full_name
+    }
+    if (updates.preferences && typeof updates.preferences === "object") {
+      payload.preferences = updates.preferences
+    }
+
     const response = await this.fetchWithAuth(`${API_BASE_URL}/users/profile`, {
       method: "PUT",
-      body: JSON.stringify(updates),
+      body: JSON.stringify(payload),
     })
 
-    const apiResponse: APIResponse<User> = await response.json()
+    const apiResponse: APIResponse<any> = await response.json()
     if (!apiResponse.success || !apiResponse.data) {
       throw new Error(apiResponse.message || "Failed to update profile")
     }
 
-    return apiResponse.data
+    const data = apiResponse.data
+    const mapped: User = {
+      id: data.id,
+      email: data.email,
+      full_name: data.full_name,
+      created_at: data.created_at,
+    }
+    return mapped
   }
 
   async getUserPreferences(): Promise<Record<string, any>> {

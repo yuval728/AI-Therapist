@@ -173,27 +173,36 @@ export function useWebSocketChat(sessionId?: string) {
   }, [sessionId, handleWebSocketMessage, handleConnectionChange, handleError])
 
   const sendMessage = useCallback(
-    (content: string) => {
-      if (!wsClient.current || connectionStatus !== "connected") {
-        setError("Not connected to chat service")
-        return
+    async (content: string) => {
+      try {
+        // Connect on demand if needed
+        if (!wsClient.current || connectionStatus !== "connected") {
+          await connect()
+        }
+
+        if (!wsClient.current || wsClient.current.getConnectionStatus() !== "connected") {
+          throw new Error("Unable to connect to chat service")
+        }
+
+        // Add user message immediately
+        const userMessage: ChatMessage = {
+          id: `msg-${Date.now()}`,
+          role: "user",
+          content,
+          timestamp: new Date().toISOString(),
+        }
+
+        setMessages((prev) => [...prev, userMessage])
+        setError(null)
+
+        // Send via WebSocket
+        wsClient.current.sendChat(content)
+      } catch (err) {
+        console.error("[v0] sendMessage failed:", err)
+        setError(err instanceof Error ? err.message : "Failed to send message")
       }
-
-      // Add user message immediately
-      const userMessage: ChatMessage = {
-        id: `msg-${Date.now()}`,
-        role: "user",
-        content,
-        timestamp: new Date().toISOString(),
-      }
-
-      setMessages((prev) => [...prev, userMessage])
-      setError(null)
-
-      // Send via WebSocket
-      wsClient.current.sendChat(content)
     },
-    [connectionStatus],
+    [connectionStatus, connect],
   )
 
   const disconnect = useCallback(() => {

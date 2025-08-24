@@ -20,7 +20,7 @@ export default function ProfilePage() {
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [formData, setFormData] = useState({
-    name: "",
+    full_name: "",
     email: "",
   })
 
@@ -37,7 +37,7 @@ export default function ProfilePage() {
       const userProfile = await apiClient.getUserProfile()
       setProfile(userProfile)
       setFormData({
-        name: userProfile.name || "",
+        full_name: userProfile.full_name || "",
         email: userProfile.email,
       })
     } catch (error) {
@@ -57,7 +57,7 @@ export default function ProfilePage() {
       setError(null)
 
       const updates: Partial<User> = {}
-      if (formData.name !== profile?.name) updates.name = formData.name
+      if (formData.full_name !== profile?.full_name) updates.full_name = formData.full_name
       if (formData.email !== profile?.email) updates.email = formData.email
 
       if (Object.keys(updates).length === 0) {
@@ -173,11 +173,11 @@ export default function ProfilePage() {
               <CardContent className="space-y-6">
                 <div className="grid gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="name">Full Name</Label>
+                    <Label htmlFor="full_name">Full Name</Label>
                     <Input
-                      id="name"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      id="full_name"
+                      value={formData.full_name}
+                      onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
                       placeholder="Enter your full name"
                       className="glass border-border/50 focus:border-primary/50"
                     />

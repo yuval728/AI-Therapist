@@ -174,7 +174,7 @@ class SupabaseClient:
         except Exception as e:
             return QueryResult(data=[], error=str(e), success=False)
     
-    # === Therapy Session Management ===
+
     
     @timing_decorator("create_therapy_session")
     async def create_therapy_session(self, session: TherapySession) -> QueryResult:

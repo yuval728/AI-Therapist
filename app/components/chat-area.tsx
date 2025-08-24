@@ -36,7 +36,7 @@ interface ChatAreaProps {
   messages: ChatMessage[]
   isTyping: boolean
   streamingState: StreamingState
-  onSendMessage: (content: string) => void
+  onSendMessage: (content: string) => Promise<void>
   connectionStatus: ConnectionStatus
   error: string | null
   activeSession: TherapySession | null
@@ -52,16 +52,18 @@ export function ChatArea({
   activeSession,
 }: ChatAreaProps) {
   const isConnected = connectionStatus === "connected"
-  const isDisabled = !isConnected || isTyping
+  // Allow typing even when disconnected; sendMessage will lazy-connect
+  const isDisabled = isTyping
 
   // Convert messages to the format expected by MessageList
-  const formattedMessages = messages.map((msg) => ({
+  type DisplayMessage = { sender: "user" | "therapist"; message: string; timestamp: string; isStreaming?: boolean }
+  const formattedMessages: DisplayMessage[] = messages.map((msg) => ({
     sender: msg.role === "user" ? ("user" as const) : ("therapist" as const),
     message: msg.content,
     timestamp: msg.timestamp,
   }))
 
-  const allMessages = [...formattedMessages]
+  const allMessages: DisplayMessage[] = [...formattedMessages]
   if (streamingState.isStreaming && streamingState.content) {
     allMessages.push({
       sender: "therapist" as const,
@@ -118,7 +120,7 @@ export function ChatArea({
         disabled={isDisabled}
         placeholder={
           !isConnected
-            ? "Connecting to chat service..."
+            ? "Type your message to start the chat"
             : isTyping
               ? "AI is responding..."
               : "How are you feeling today?"

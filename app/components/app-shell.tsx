@@ -31,7 +31,7 @@ import { useToast } from "@/hooks/use-toast"
 export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [rightPanelTab, setRightPanelTab] = useState("summary")
-  const { user, logout } = useAuth()
+  const { user, logout, loading: authLoading } = useAuth()
   const router = useRouter()
   const { toast } = useToast()
 
@@ -65,27 +65,28 @@ export function AppShell() {
     initializeSessions()
   }, [initializeSessions])
 
-  // Guard to prevent duplicate initial session creation under React Strict Mode
-  const createdInitialSessionRef = useRef(false)
+  // Redirect to auth if user becomes unauthenticated
+  useEffect(() => {
+    if (!authLoading && !user) {
+      // Ensure we fully disconnect and clear any active session state
+      disconnect()
+      setActiveSession(null)
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("activeSessionId")
+      }
+      router.push("/auth")
+    }
+  }, [authLoading, user, disconnect, setActiveSession, router])
 
-  // Connect WebSocket when active session changes
+  // Connect WS when a session is selected; disconnect when none is active
   useEffect(() => {
     if (activeSessionId) {
       connect()
     } else {
       disconnect()
     }
-
     return () => disconnect()
   }, [activeSessionId, connect, disconnect])
-
-  // Create initial session if none exists
-  useEffect(() => {
-    if (!sessionsLoading && sessions.length === 0 && !activeSessionId && !createdInitialSessionRef.current) {
-      createdInitialSessionRef.current = true
-      handleNewSession()
-    }
-  }, [sessionsLoading, sessions.length, activeSessionId])
 
   const handleNewSession = async () => {
     try {
