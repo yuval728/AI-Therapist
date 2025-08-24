@@ -115,22 +115,23 @@ class LLMClient:
                 )
                 raise ValidationError("Potential prompt injection detected")
         
-        # Check token limits
-        estimated_tokens = sum(len(msg.get("content", "").split()) 
-                             for msg in request.messages)
+        # Check token limits with more accurate estimation
+        estimated_tokens = self._estimate_tokens(request.messages)
         if estimated_tokens > self.settings.models.max_tokens_chat:
             raise ValidationError(f"Request exceeds token limit: {estimated_tokens}")
     
+    def _estimate_tokens(self, messages: List[Dict[str, str]]) -> int:
+        """More accurate token estimation."""
+        # Rough approximation: 1 token ≈ 0.75 words
+        total_chars = sum(len(msg.get("content", "")) for msg in messages)
+        return int(total_chars / 3)  # Conservative estimate
+    
     def _detect_prompt_injection(self, content: str) -> bool:
-        """Basic prompt injection detection."""
+        """Enhanced prompt injection detection with configurable patterns."""
         injection_patterns = [
-            "ignore previous instructions",
-            "disregard above",
-            "act as",
-            "simulate",
-            "pretend to be",
-            "jailbreak",
-            "you are now"
+            "ignore previous instructions", "disregard above", "act as", "simulate",
+            "pretend to be", "jailbreak", "you are now", "forget everything",
+            "new instructions", "override", "system prompt", "developer mode"
         ]
         content_lower = content.lower()
         return any(pattern in content_lower for pattern in injection_patterns)
@@ -187,8 +188,8 @@ class LLMClient:
 _llm_client = LLMClient()
 
 
-async def async_completion(**kwargs) -> Dict[str, Any]:
-    """Convenient async completion function."""
+async def get_completion(**kwargs) -> Dict[str, Any]:
+    """Get LLM completion with validation and monitoring."""
     return await _llm_client.completion(kwargs)
 
 
@@ -200,16 +201,20 @@ async def chat_completion(
     **kwargs
 ) -> str:
     """Simplified chat completion that returns just the content."""
-    request = CompletionRequest(
-        model=model or settings.models.chat_model,
-        messages=messages,
-        temperature=temperature or settings.models.temperature_chat,
-        user_id=user_id,
-        **kwargs
-    )
-    
-    result = await _llm_client.completion(request)
-    return result["choices"][0]["message"]["content"]
+    try:
+        request = CompletionRequest(
+            model=model or settings.models.chat_model,
+            messages=messages,
+            temperature=temperature or settings.models.temperature_chat,
+            user_id=user_id,
+            **kwargs
+        )
+        
+        result = await _llm_client.completion(request)
+        return result["choices"][0]["message"]["content"]
+    except Exception as e:
+        # Fallback for critical therapy responses
+        return "I'm here to support you. Could you tell me more about what's on your mind?"
 
 
 async def classify_text(

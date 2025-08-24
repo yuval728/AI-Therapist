@@ -1,8 +1,8 @@
 """Consolidated therapy tools for analysis and processing."""
 from pydantic import BaseModel
 import json
-from src.config.config import get_settings
-from src.core.llm_utils import async_completion
+from src.config import get_settings
+from src.core.llm_utils import get_completion
 
 settings = get_settings()
 
@@ -34,7 +34,7 @@ If it's safe or neutral, respond with ONLY False.
         },
     ]
 
-    response = await async_completion(
+    response = await get_completion(
         model=settings.model_light,
         messages=messages,
         temperature=settings.temperature_classifiers,
@@ -55,7 +55,7 @@ async def emotion_tool(text: str) -> str:
         {"role": "user", "content": f"What emotion is being expressed in this message: '{text}'? Reply with one word only."}
     ]
 
-    response = await async_completion(
+    response = await get_completion(
         model=settings.model_light, 
         messages=messages, 
         temperature=settings.temperature_classifiers, 
@@ -81,7 +81,7 @@ async def journal_tool(entry: str) -> str:
         {"role": "user", "content": f"Journal Entry:\n{entry}"}
     ]
     
-    response = await async_completion(
+    response = await get_completion(
         model=settings.model_chat, 
         messages=messages, 
         temperature=settings.temperature_chat

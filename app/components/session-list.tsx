@@ -1,13 +1,13 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Plus, Search, MessageCircle, Calendar, Loader2 } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
-import { cn } from "@/lib/utils"
+import { cn, formatDate, truncateText } from "@/lib/utils"
 import type { TherapySession } from "@/lib/api"
 
 interface SessionListProps {
@@ -36,13 +36,15 @@ export function SessionList({
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
 
-  // Update filtered sessions when search query or sessions change
-  useEffect(() => {
+  const updateFilteredSessions = useCallback(() => {
     const filtered = searchQuery ? onSearch(searchQuery) : sessions
     setFilteredSessions(filtered)
   }, [searchQuery, sessions, onSearch])
 
-  // Infinite scroll observer
+  useEffect(() => {
+    updateFilteredSessions()
+  }, [updateFilteredSessions])
+
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
@@ -60,7 +62,7 @@ export function SessionList({
     return () => observer.disconnect()
   }, [hasMore, loading, onLoadMore])
 
-  const formatSessionDate = (dateString: string) => {
+  const formatSessionDate = useCallback((dateString: string) => {
     const date = new Date(dateString)
     const now = new Date()
     const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60)
@@ -72,9 +74,9 @@ export function SessionList({
     } else {
       return date.toLocaleDateString([], { month: "short", day: "numeric" })
     }
-  }
+  }, [])
 
-  const getEmotionColor = (emotion?: string) => {
+  const getEmotionColor = useCallback((emotion?: string) => {
     if (!emotion) return "bg-gray-500/10 text-gray-600"
 
     const emotionColors: Record<string, string> = {
@@ -87,7 +89,7 @@ export function SessionList({
     }
 
     return emotionColors[emotion.toLowerCase()] || "bg-gray-500/10 text-gray-600"
-  }
+  }, [])
 
   return (
     <div className="flex flex-col h-full bg-background/50 backdrop-blur-sm border-r border-border/50">

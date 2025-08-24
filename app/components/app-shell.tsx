@@ -60,10 +60,10 @@ export function AppShell() {
     getSessionId,
   } = useWebSocketChat(activeSessionId || undefined)
 
-  // Initialize sessions on mount
+  // Initialize sessions on mount (only once)
   useEffect(() => {
     initializeSessions()
-  }, [initializeSessions])
+  }, []) // Remove dependency to prevent re-initialization
 
   // Redirect to auth if user becomes unauthenticated
   useEffect(() => {

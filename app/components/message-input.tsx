@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useState, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Send, Loader2 } from "lucide-react"
@@ -23,7 +23,7 @@ export function MessageInput({
   const [isSending, setIsSending] = useState(false)
   const [isFocused, setIsFocused] = useState(false)
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
     if (!message.trim() || isSending || disabled) return
 
@@ -35,18 +35,18 @@ export function MessageInput({
       await onSendMessage(messageToSend)
     } catch (error) {
       console.error("Failed to send message:", error)
-      setMessage(messageToSend) // Restore message on error
+      setMessage(messageToSend)
     } finally {
       setIsSending(false)
     }
-  }
+  }, [message, isSending, disabled, onSendMessage])
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       handleSubmit(e)
     }
-  }
+  }, [handleSubmit])
 
   return (
     <motion.div
@@ -107,7 +107,7 @@ export function MessageInput({
               >
                 <motion.div
                   animate={{ rotate: isSending ? 360 : 0 }}
-                  transition={{ duration: isSending ? 1 : 0.3, repeat: isSending ? Number.POSITIVE_INFINITY : 0 }}
+                  transition={{ duration: isSending ? 1 : 0.3, repeat: isSending ? Infinity : 0 }}
                 >
                   {isSending ? <Loader2 className="h-4 w-4" /> : <Send className="h-4 w-4" />}
                 </motion.div>

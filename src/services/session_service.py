@@ -49,29 +49,14 @@ class SessionService:
                     .execute()
                 )
                 if recent and getattr(recent, "data", None):
-                    session_data = recent.data[0]
-                    existing = TherapySession(
-                        id=session_data["session_id"],
-                        user_id=session_data["user_id"],
-                        emotion_detected=EmotionType(session_data.get("emotion", "neutral")) if session_data.get("emotion") else None,
-                        emotion_confidence=session_data.get("emotion_confidence"),
-                        crisis_level=CrisisLevel(session_data.get("crisis_level", "none")) if session_data.get("crisis_level") else None,
-                        summary=session_data.get("session_summary"),
-                        metadata=session_data.get("metadata", {}),
-                        processing_status=ProcessingStatus(session_data.get("processing_status", "pending")),
-                        ended_at=datetime.fromisoformat(str(session_data.get("ended_at")).replace('Z', '+00:00')) if session_data.get("ended_at") else None,
-                        created_at=datetime.fromisoformat(session_data["created_at"].replace('Z', '+00:00')),
-                        updated_at=datetime.fromisoformat(session_data["updated_at"].replace('Z', '+00:00')),
-                    )
+                    existing = self._build_session_from_data(recent.data[0])
                     log_therapy_event(
                         event="session_idempotent_return",
-                        user_id=user_id,
-                        session_id=existing.id,
+                        user_id=user_id, session_id=existing.id,
                         metadata={"window_seconds": idempotency_window_seconds}
                     )
                     return APIResponse(
-                        success=True,
-                        data=existing,
+                        success=True, data=existing,
                         message="Existing recent session returned"
                     )
             except Exception:
@@ -143,20 +128,7 @@ class SessionService:
                     error_code="SESSION_NOT_FOUND"
                 )
             
-            session_data = result.data[0]
-            session = TherapySession(
-                id=session_data["session_id"],
-                user_id=session_data["user_id"],
-                emotion_detected=EmotionType(session_data.get("emotion", "neutral")) if session_data.get("emotion") else None,
-                emotion_confidence=session_data.get("emotion_confidence"),
-                crisis_level=CrisisLevel(session_data.get("crisis_level", "none")) if session_data.get("crisis_level") else None,
-                summary=session_data.get("session_summary"),
-                metadata=session_data.get("metadata", {}),
-                processing_status=ProcessingStatus(session_data.get("processing_status", "pending")),
-                ended_at=datetime.fromisoformat(str(session_data.get("ended_at")).replace('Z', '+00:00')) if session_data.get("ended_at") else None,
-                created_at=datetime.fromisoformat(session_data["created_at"].replace('Z', '+00:00')),
-                updated_at=datetime.fromisoformat(session_data["updated_at"].replace('Z', '+00:00'))
-            )
+            session = self._build_session_from_data(result.data[0])
             
             return APIResponse(
                 success=True,
@@ -196,22 +168,7 @@ class SessionService:
             
             result = query.execute()
             
-            sessions = []
-            for session_data in result.data:
-                session = TherapySession(
-                    id=session_data["session_id"],
-                    user_id=session_data["user_id"],
-                    emotion_detected=EmotionType(session_data.get("emotion", "neutral")) if session_data.get("emotion") else None,
-                    emotion_confidence=session_data.get("emotion_confidence"),
-                    crisis_level=CrisisLevel(session_data.get("crisis_level", "none")) if session_data.get("crisis_level") else None,
-                    summary=session_data.get("session_summary"),
-                    metadata=session_data.get("metadata", {}),
-                    processing_status=ProcessingStatus(session_data.get("processing_status", "pending")),
-                    ended_at=datetime.fromisoformat(str(session_data.get("ended_at")).replace('Z', '+00:00')) if session_data.get("ended_at") else None,
-                    created_at=datetime.fromisoformat(session_data["created_at"].replace('Z', '+00:00')),
-                    updated_at=datetime.fromisoformat(session_data["updated_at"].replace('Z', '+00:00'))
-                )
-                sessions.append(session)
+            sessions = [self._build_session_from_data(data) for data in result.data]
             
             return APIResponse(
                 success=True,
@@ -246,54 +203,16 @@ class SessionService:
         await self._ensure_initialized()
         
         try:
-            # Validate updates (use DB column names)
-            allowed_fields = {
-                "emotion",
-                "emotion_confidence",
-                "crisis_level",
-                "processing_status",
-                "session_summary",
-                "metadata",
-                "ended_at",
-            }
-            invalid_fields = set(updates.keys()) - allowed_fields
-            
-            if invalid_fields:
+            # Validate and normalize updates
+            validation_result = self._validate_and_normalize_updates(updates)
+            if not validation_result["valid"]:
                 return APIResponse(
                     success=False,
-                    error=f"Invalid fields: {', '.join(invalid_fields)}",
+                    error=validation_result["error"],
                     error_code="VALIDATION_ERROR"
                 )
-
-            # Normalize enums and values to match DB
-            normalized: Dict[str, Any] = {}
-            for k, v in updates.items():
-                if k == "emotion":
-                    if isinstance(v, EmotionType):
-                        normalized[k] = v.value
-                    else:
-                        normalized[k] = v
-                elif k == "crisis_level":
-                    # Map NONE to NULL for DB constraint
-                    if isinstance(v, CrisisLevel):
-                        normalized[k] = None if v == CrisisLevel.NONE else v.value
-                    else:
-                        normalized[k] = None if str(v).lower() == "none" else v
-                elif k == "processing_status":
-                    if isinstance(v, ProcessingStatus):
-                        normalized[k] = v.value
-                    else:
-                        # Validate against enum values
-                        try:
-                            normalized[k] = ProcessingStatus(str(v)).value
-                        except Exception:
-                            return APIResponse(
-                                success=False,
-                                error="Invalid processing_status",
-                                error_code="VALIDATION_ERROR"
-                            )
-                else:
-                    normalized[k] = v
+            
+            normalized = validation_result["data"]
 
             # Update in database
             result = self.supabase_client.client.table("therapy_sessions")\
@@ -386,20 +305,7 @@ class SessionService:
                     error_code="MESSAGES_FETCH_FAILED"
                 )
             
-            messages = []
-            for msg_data in result.data:
-                # Prefer 'timestamp' column from memory_logs, fallback to 'created_at'
-                ts_raw = msg_data.get("timestamp") or msg_data.get("created_at")
-                ts = datetime.fromisoformat(str(ts_raw).replace('Z', '+00:00')) if ts_raw else datetime.now(timezone.utc)
-                message = SessionMessage(
-                    role=msg_data["role"],
-                    content=msg_data["content"],
-                    message_type=MessageType(msg_data.get("message_type", "user_input")),
-                    emotion=EmotionType(msg_data.get("emotion", "neutral")) if msg_data.get("emotion") else None,
-                    timestamp=ts,
-                    metadata=msg_data.get("metadata", {})
-                )
-                messages.append(message)
+            messages = [self._build_message_from_data(data) for data in result.data]
             
             return APIResponse(
                 success=True,
@@ -534,6 +440,92 @@ class SessionService:
                 error="Failed to generate session summary",
                 error_code="INTERNAL_ERROR"
             )
+    
+    def _build_session_from_data(self, session_data: Dict[str, Any]) -> TherapySession:
+        """Build TherapySession object from database data."""
+        return TherapySession(
+            id=session_data["session_id"],
+            user_id=session_data["user_id"],
+            emotion_detected=(
+                EmotionType(session_data.get("emotion", "neutral")) 
+                if session_data.get("emotion") else None
+            ),
+            emotion_confidence=session_data.get("emotion_confidence"),
+            crisis_level=(
+                CrisisLevel(session_data.get("crisis_level", "none")) 
+                if session_data.get("crisis_level") else None
+            ),
+            summary=session_data.get("session_summary"),
+            metadata=session_data.get("metadata", {}),
+            processing_status=ProcessingStatus(session_data.get("processing_status", "pending")),
+            ended_at=(
+                datetime.fromisoformat(str(session_data.get("ended_at")).replace('Z', '+00:00')) 
+                if session_data.get("ended_at") else None
+            ),
+            created_at=datetime.fromisoformat(session_data["created_at"].replace('Z', '+00:00')),
+            updated_at=datetime.fromisoformat(session_data["updated_at"].replace('Z', '+00:00'))
+        )
+    
+    def _build_message_from_data(self, msg_data: Dict[str, Any]) -> SessionMessage:
+        """Build SessionMessage object from database data."""
+        # Prefer 'timestamp' column from memory_logs, fallback to 'created_at'
+        ts_raw = msg_data.get("timestamp") or msg_data.get("created_at")
+        ts = (
+            datetime.fromisoformat(str(ts_raw).replace('Z', '+00:00')) 
+            if ts_raw else datetime.now(timezone.utc)
+        )
+        
+        return SessionMessage(
+            role=msg_data["role"],
+            content=msg_data["content"],
+            message_type=MessageType(msg_data.get("message_type", "user_input")),
+            emotion=(
+                EmotionType(msg_data.get("emotion", "neutral")) 
+                if msg_data.get("emotion") else None
+            ),
+            timestamp=ts,
+            metadata=msg_data.get("metadata", {})
+        )
+    
+    def _validate_and_normalize_updates(self, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate and normalize session update fields."""
+        allowed_fields = {
+            "emotion", "emotion_confidence", "crisis_level", "processing_status",
+            "session_summary", "metadata", "ended_at"
+        }
+        
+        invalid_fields = set(updates.keys()) - allowed_fields
+        if invalid_fields:
+            return {
+                "valid": False,
+                "error": f"Invalid fields: {', '.join(invalid_fields)}"
+            }
+        
+        normalized = {}
+        for k, v in updates.items():
+            if k == "emotion":
+                normalized[k] = v.value if isinstance(v, EmotionType) else v
+            elif k == "crisis_level":
+                # Map NONE to NULL for DB constraint
+                if isinstance(v, CrisisLevel):
+                    normalized[k] = None if v == CrisisLevel.NONE else v.value
+                else:
+                    normalized[k] = None if str(v).lower() == "none" else v
+            elif k == "processing_status":
+                if isinstance(v, ProcessingStatus):
+                    normalized[k] = v.value
+                else:
+                    try:
+                        normalized[k] = ProcessingStatus(str(v)).value
+                    except Exception:
+                        return {
+                            "valid": False,
+                            "error": "Invalid processing_status"
+                        }
+            else:
+                normalized[k] = v
+        
+        return {"valid": True, "data": normalized}
 
 
 # Global service instance

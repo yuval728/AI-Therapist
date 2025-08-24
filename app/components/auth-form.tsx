@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,6 +10,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { Loader2, Mail, Lock, User, Eye, EyeOff } from "lucide-react"
 import { motion } from "framer-motion"
 import { apiClient } from "@/lib/api"
+import { isValidEmail } from "@/lib/utils"
 
 interface AuthFormProps {
   mode: "login" | "signup"
@@ -32,23 +32,28 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
 
   const { login, signup } = useAuth()
 
+  const validateForm = (): string | null => {
+    if (!email.trim()) return "Email is required"
+    if (!isValidEmail(email)) return "Please enter a valid email address"
+    if (!password) return "Password is required"
+    if (password.length < 8) return "Password must be at least 8 characters"
+    
+    if (mode === "signup") {
+      if (password !== confirmPassword) return "Passwords do not match"
+      if (!termsAccepted) return "You must accept the Terms of Service"
+    }
+    
+    return null
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setFormError(null)
     setFormSuccess(null)
 
-    if (mode === "signup" && password !== confirmPassword) {
-      setFormError("Passwords do not match")
-      return
-    }
-
-    if (password.length < 8) {
-      setFormError("Password must be at least 8 characters")
-      return
-    }
-
-    if (mode === "signup" && !termsAccepted) {
-      setFormError("You must accept the Terms of Service")
+    const validationError = validateForm()
+    if (validationError) {
+      setFormError(validationError)
       return
     }
 
@@ -60,11 +65,8 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
         onSuccess()
       } else {
         await signup(email, password, fullName || undefined)
-        // Do not redirect after signup. Switch to login mode and show success message
         setFormSuccess("Account created successfully. Please sign in.")
-        setPassword("")
-        setConfirmPassword("")
-        setTermsAccepted(false)
+        resetSignupForm()
         onToggleMode()
       }
     } catch (err) {
@@ -72,6 +74,13 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  const resetSignupForm = () => {
+    setPassword("")
+    setConfirmPassword("")
+    setTermsAccepted(false)
+    setFullName("")
   }
 
   return (

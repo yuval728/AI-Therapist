@@ -1,6 +1,6 @@
 """Enhanced Supabase client with comprehensive integration for AI therapist."""
 import os
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 import asyncio
@@ -12,8 +12,8 @@ from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_core.documents import Document
 
 from src.config import get_settings
-from src.models import TherapySession, SessionMessage, CrisisLevel, EmotionType, MessageType
-from src.utils import log_event, timing_decorator, ValidationError
+from src.models import TherapySession, CrisisLevel, EmotionType, MessageType
+from src.utils import log_event, timing_decorator
 
 
 @dataclass
@@ -66,49 +66,49 @@ class SupabaseClient:
     async def initialize(self) -> bool:
         """Initialize Supabase client and vector store."""
         try:
-            
             effective_key = self.config.service_role_key or self.config.key
             self.client = create_client(self.config.url, effective_key)
             
-            # Initialize embeddings (optional)
-            google_api_key = os.getenv("GOOGLE_API_KEY")
-            if google_api_key:
-                try:
-                    self.embeddings = GoogleGenerativeAIEmbeddings(
-                        model="models/embedding-001",
-                        google_api_key=google_api_key
-                    )
-                    # Initialize vector store (only if embeddings available)
-                    self.vector_store = SupabaseVectorStore(
-                        client=self.client,
-                        embedding=self.embeddings,
-                        table_name="documents",
-                        query_name="match_documents"
-                    )
-                except Exception as e:
-                    # Don't block overall initialization on vector store setup
-                    log_event(event="embeddings_init_warning", error=str(e))
-            else:
-                log_event(event="embeddings_not_configured", message="GOOGLE_API_KEY not set; vector features disabled")
-           
+            # Initialize embeddings and vector store if Google API key is available
+            self._initialize_vector_store()
+            
             self._initialized = True
             
             log_event(
                 event="supabase_client_initialized",
                 metadata={
                     "url": self.config.url[:50] + "...",
-                    "using_service_role": bool(self.config.service_role_key)
+                    "using_service_role": bool(self.config.service_role_key),
+                    "vector_store_enabled": bool(self.vector_store)
                 }
             )
             
             return True
             
         except Exception as e:
-            log_event(
-                event="supabase_initialization_failed",
-                error=str(e)
-            )
+            log_event(event="supabase_initialization_failed", error=str(e))
             return False
+    
+    def _initialize_vector_store(self):
+        """Initialize vector store components."""
+        google_api_key = os.getenv("GOOGLE_API_KEY")
+        if not google_api_key:
+            log_event(event="embeddings_not_configured", message="GOOGLE_API_KEY not set; vector features disabled")
+            return
+        
+        try:
+            self.embeddings = GoogleGenerativeAIEmbeddings(
+                model="models/embedding-001",
+                google_api_key=google_api_key
+            )
+            self.vector_store = SupabaseVectorStore(
+                client=self.client,
+                embedding=self.embeddings,
+                table_name="documents",
+                query_name="match_documents"
+            )
+        except Exception as e:
+            log_event(event="embeddings_init_warning", error=str(e))
 
     
     def _ensure_initialized(self):
@@ -138,24 +138,10 @@ class SupabaseClient:
             }
             
             result = self.client.table("profiles").insert(data).execute()
-            
-            if getattr(result, "error", None):
-                return QueryResult(data=[], error=str(result.error), success=False)
-            
-            log_event(
-                event="user_profile_created",
-                user_id=user_id,
-                email=email
-            )
-            
-            return QueryResult(data=result.data, success=True, error=None)
+            return self._process_query_result(result, "user_profile_created", user_id=user_id, email=email)
             
         except Exception as e:
-            log_event(
-                event="user_profile_creation_failed",
-                user_id=user_id,
-                error=str(e)
-            )
+            log_event(event="user_profile_creation_failed", user_id=user_id, error=str(e))
             return QueryResult(data=[], error=str(e), success=False)
     
     @timing_decorator("get_user_profile")
@@ -165,16 +151,21 @@ class SupabaseClient:
         
         try:
             result = self.client.table("profiles").select("*").eq("id", user_id).execute()
-            
-            if getattr(result, "error", None):
-                return QueryResult(data=[], error=str(result.error), success=False)
-            
-            return QueryResult(data=result.data, success=True, error=None)
+            return self._process_query_result(result)
             
         except Exception as e:
             return QueryResult(data=[], error=str(e), success=False)
     
 
+    def _process_query_result(self, result, success_event: Optional[str] = None, **event_data) -> QueryResult:
+        """Process Supabase query result consistently."""
+        if getattr(result, "error", None):
+            return QueryResult(data=[], error=str(result.error), success=False)
+        
+        if success_event:
+            log_event(event=success_event, **event_data)
+        
+        return QueryResult(data=result.data, success=True, error=None)
     
     @timing_decorator("create_therapy_session")
     async def create_therapy_session(self, session: TherapySession) -> QueryResult:
@@ -182,48 +173,37 @@ class SupabaseClient:
         self._ensure_initialized()
         
         try:
-            # Convert enums to plain values for persistence
-            emotion_value = (
-                session.emotion_detected.value if session.emotion_detected else None
-            )
-            crisis_value = (
-                session.crisis_level.value if (session.crisis_level and session.crisis_level.value != "none") else None
-            )
-            processing_value = (
-                session.processing_status.value if getattr(session, "processing_status", None) else "pending"
-            )
-
-            data = {
-                "user_id": session.user_id,
-                "session_id": session.id,
-                "emotion": emotion_value,
-                "emotion_confidence": session.emotion_confidence,
-                "crisis_level": crisis_value,
-                "processing_status": processing_value,
-                "session_summary": session.summary,
-                "metadata": session.metadata,
-            }
-            
+            data = self._prepare_session_data(session)
             result = self.client.table("therapy_sessions").insert(data).execute()
-            
-            if getattr(result, "error", None):
-                return QueryResult(data=[], error=str(result.error), success=False)
-            
-            log_event(
-                event="therapy_session_created",
-                user_id=session.user_id,
-                session_id=session.id
+            return self._process_query_result(
+                result, "therapy_session_created", 
+                user_id=session.user_id, session_id=session.id
             )
-            
-            return QueryResult(data=result.data, success=True, error=None)
             
         except Exception as e:
-            log_event(
-                event="therapy_session_creation_failed",
-                user_id=session.user_id,
-                error=str(e)
-            )
+            log_event(event="therapy_session_creation_failed", user_id=session.user_id, error=str(e))
             return QueryResult(data=[], error=str(e), success=False)
+    
+    def _prepare_session_data(self, session: TherapySession) -> Dict[str, Any]:
+        """Prepare session data for database insertion."""
+        return {
+            "user_id": session.user_id,
+            "session_id": session.id,
+            "emotion": session.emotion_detected.value if session.emotion_detected else None,
+            "emotion_confidence": session.emotion_confidence,
+            "crisis_level": (
+                session.crisis_level.value 
+                if session.crisis_level and session.crisis_level.value != "none" 
+                else None
+            ),
+            "processing_status": (
+                session.processing_status.value 
+                if getattr(session, "processing_status", None) 
+                else "pending"
+            ),
+            "session_summary": session.summary,
+            "metadata": session.metadata,
+        }
     
     @timing_decorator("update_therapy_session")
     async def update_therapy_session(
@@ -244,24 +224,15 @@ class SupabaseClient:
                 .execute()
             )
             
-            if getattr(result, "error", None):
-                return QueryResult(data=[], error=str(result.error), success=False)
-            
-            log_event(
-                event="therapy_session_updated",
-                user_id=user_id,
-                session_id=session_id,
-                updates=list(updates.keys())
+            return self._process_query_result(
+                result, "therapy_session_updated",
+                user_id=user_id, session_id=session_id, updates=list(updates.keys())
             )
-            
-            return QueryResult(data=result.data)
             
         except Exception as e:
             log_event(
                 event="therapy_session_update_failed",
-                user_id=user_id,
-                session_id=session_id,
-                error=str(e)
+                user_id=user_id, session_id=session_id, error=str(e)
             )
             return QueryResult(data=[], error=str(e), success=False)
     
@@ -301,18 +272,12 @@ class SupabaseClient:
             }
             
             result = self.client.table("memory_logs").insert(data).execute()
-            
-            if getattr(result, "error", None):
-                return QueryResult(data=[], error=str(result.error), success=False)
-            
-            return QueryResult(data=result.data, success=True, error=None)
+            return self._process_query_result(result)
             
         except Exception as e:
             log_event(
                 event="memory_log_save_failed",
-                user_id=user_id,
-                session_id=session_id,
-                error=str(e)
+                user_id=user_id, session_id=session_id, error=str(e)
             )
             return QueryResult(data=[], error=str(e), success=False)
     
@@ -333,11 +298,7 @@ class SupabaseClient:
                 query = query.eq("session_id", session_id)
             
             result = query.order("timestamp", desc=True).limit(limit).execute()
-            
-            if getattr(result, "error", None):
-                return QueryResult(data=[], error=str(result.error), success=False)
-            
-            return QueryResult(data=result.data, success=True, error=None)
+            return self._process_query_result(result)
             
         except Exception as e:
             return QueryResult(data=[], error=str(e), success=False)
@@ -355,6 +316,10 @@ class SupabaseClient:
         """Save content to vector store."""
         self._ensure_initialized()
         
+        if not self.vector_store:
+            log_event(event="vector_store_not_available", user_id=user_id)
+            return False
+        
         try:
             full_metadata = {
                 "user_id": user_id,
@@ -364,28 +329,17 @@ class SupabaseClient:
                 **(metadata or {})
             }
             
-            document = Document(
-                page_content=content,
-                metadata=full_metadata
-            )
-            
+            document = Document(page_content=content, metadata=full_metadata)
             await asyncio.to_thread(self.vector_store.add_documents, [document])
             
             log_event(
                 event="vector_store_save_success",
-                user_id=user_id,
-                content_type=content_type,
-                content_length=len(content)
+                user_id=user_id, content_type=content_type, content_length=len(content)
             )
-            
             return True
             
         except Exception as e:
-            log_event(
-                event="vector_store_save_failed",
-                user_id=user_id,
-                error=str(e)
-            )
+            log_event(event="vector_store_save_failed", user_id=user_id, error=str(e))
             return False
     
     @timing_decorator("search_vector_store")
@@ -399,72 +353,64 @@ class SupabaseClient:
         """Search vector store for relevant documents."""
         self._ensure_initialized()
         
+        if not self.vector_store or not self.embeddings:
+            log_event(event="vector_search_not_available", user_id=user_id)
+            return []
+        
         try:
-            # Use the enhanced RPC function
             embedding = await asyncio.to_thread(self.embeddings.embed_query, query)
+            result = self._execute_vector_search(user_id, embedding, k, threshold)
             
-            result = self.client.rpc(
-                "match_documents",
-                {
-                    "user_id_param": user_id,
-                    "query_embedding": embedding,
-                    "match_threshold": threshold,
-                    "match_count": k
-                }
-            ).execute()
+            if not result:
+                return []
             
-            if getattr(result, "error", None):
-                # Fallback: try legacy function signature without threshold if suggested by PostgREST
-                error_str = str(result.error)
-                if "Could not find the function" in error_str and "match_documents" in error_str:
-                    fallback = self.client.rpc(
-                        "match_documents",
-                        {
-                            "user_id": user_id,
-                            "query_embedding": embedding,
-                            "match_count": k,
-                        }
-                    ).execute()
-                    if getattr(fallback, "error", None):
-                        log_event(
-                            event="vector_search_failed",
-                            user_id=user_id,
-                            error=str(fallback.error)
-                        )
-                        return []
-                    result = fallback
-                else:
-                    log_event(
-                        event="vector_search_failed",
-                        user_id=user_id,
-                        error=error_str
-                    )
-                    return []
-            
-            documents = []
-            for row in result.data:
-                doc = Document(
-                    page_content=row["content"],
-                    metadata=row["metadata"]
-                )
-                documents.append(doc)
+            documents = [
+                Document(page_content=row["content"], metadata=row["metadata"])
+                for row in result.data
+            ]
             
             log_event(
                 event="vector_search_completed",
-                user_id=user_id,
-                query_length=len(query),
-                results_found=len(documents)
+                user_id=user_id, query_length=len(query), results_found=len(documents)
             )
-            
             return documents
             
         except Exception as e:
-            log_event(
-                event="vector_search_failed",
-                user_id=user_id,
-                error=str(e)
-            )
+            log_event(event="vector_search_failed", user_id=user_id, error=str(e))
             return []
+    
+    def _execute_vector_search(self, user_id: str, embedding: List[float], k: int, threshold: float):
+        """Execute vector search with fallback for different RPC signatures."""
+        # Try enhanced RPC function first
+        result = self.client.rpc(
+            "match_documents",
+            {
+                "user_id_param": user_id,
+                "query_embedding": embedding,
+                "match_threshold": threshold,
+                "match_count": k
+            }
+        ).execute()
+        
+        if getattr(result, "error", None):
+            error_str = str(result.error)
+            if "Could not find the function" in error_str and "match_documents" in error_str:
+                # Try legacy function signature
+                fallback = self.client.rpc(
+                    "match_documents",
+                    {"user_id": user_id, "query_embedding": embedding, "match_count": k}
+                ).execute()
+                
+                if not getattr(fallback, "error", None):
+                    return fallback
+                
+                log_event(event="vector_search_failed", user_id=user_id, error=str(fallback.error))
+                return None
+            else:
+                log_event(event="vector_search_failed", user_id=user_id, error=error_str)
+                return None
+        
+        return result
     
     # === Crisis Management ===
     
@@ -494,26 +440,16 @@ class SupabaseClient:
             }
             
             result = self.client.table("crisis_events").insert(data).execute()
-            
-            if getattr(result, "error", None):
-                return QueryResult(data=[], error=str(result.error), success=False)
-            
-            log_event(
-                event="crisis_event_logged",
-                user_id=user_id,
-                session_id=session_id,
-                crisis_level=crisis_level.value,
-                escalation_needed=escalation_needed
+            return self._process_query_result(
+                result, "crisis_event_logged",
+                user_id=user_id, session_id=session_id, 
+                crisis_level=crisis_level.value, escalation_needed=escalation_needed
             )
-            
-            return QueryResult(data=result.data)
             
         except Exception as e:
             log_event(
                 event="crisis_event_logging_failed",
-                user_id=user_id,
-                session_id=session_id,
-                error=str(e)
+                user_id=user_id, session_id=session_id, error=str(e)
             )
             return QueryResult(data=[], error=str(e), success=False)
     
@@ -579,16 +515,13 @@ class SupabaseClient:
         """Clean up old data beyond retention period."""
         self._ensure_initialized()
         
-        cleanup_results = {}
-        cutoff_date = datetime.now(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        ) - timedelta(days=days)
+        cutoff_date = (
+            datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) 
+            - timedelta(days=days)
+        )
         
-        tables_to_cleanup = [
-            "memory_logs",
-            "security_events", 
-            "performance_metrics"
-        ]
+        tables_to_cleanup = ["memory_logs", "security_events", "performance_metrics"]
+        cleanup_results = {}
         
         for table in tables_to_cleanup:
             try:
@@ -600,11 +533,7 @@ class SupabaseClient:
                 )
                 cleanup_results[table] = len(result.data) if result.data else 0
             except Exception as e:
-                log_event(
-                    event="cleanup_failed",
-                    table=table,
-                    error=str(e)
-                )
+                log_event(event="cleanup_failed", table=table, error=str(e))
                 cleanup_results[table] = 0
         
         return cleanup_results
@@ -614,6 +543,8 @@ class SupabaseClient:
         if self.client:
             # Supabase client doesn't have explicit close method
             self.client = None
+        self.vector_store = None
+        self.embeddings = None
         self._initialized = False
 
 

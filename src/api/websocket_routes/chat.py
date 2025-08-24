@@ -148,8 +148,8 @@ async def chat_websocket(websocket: WebSocket):
             manager.disconnect(user_id)
         try:
             await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
-        except:
-            pass
+        except Exception:
+            pass  # WebSocket already closed or connection lost
 
 async def handle_chat_message(user_id: str, session_id: str, message: Dict[str, Any]):
     """Handle incoming chat message from WebSocket."""

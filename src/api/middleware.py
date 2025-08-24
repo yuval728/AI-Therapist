@@ -76,9 +76,11 @@ class SecurityMiddleware(BaseHTTPMiddleware):
     
     def _get_client_ip(self, request: Request) -> str:
         """Get client IP address."""
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
+        # Check common proxy headers in order of preference
+        for header in ["X-Forwarded-For", "X-Real-IP", "CF-Connecting-IP"]:
+            value = request.headers.get(header)
+            if value:
+                return value.split(",")[0].strip()
         return request.client.host if request.client else "unknown"
     
     
@@ -90,7 +92,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         request_id: str
     ):
         """Log request details."""
-        duration = time.time() - start_time
+        duration_ms = round((time.time() - start_time) * 1000, 2)
         
         log_therapy_event(
             event="api_request",
@@ -98,7 +100,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             method=request.method,
             path=request.url.path,
             status_code=response.status_code,
-            duration_ms=round(duration * 1000, 2),
+            duration_ms=duration_ms,
             client_ip=self._get_client_ip(request),
             user_agent=request.headers.get("User-Agent", "unknown")
         )
@@ -110,11 +112,16 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         start_time: float
     ) -> Response:
         """Add security and tracking headers to response."""
-        response.headers["X-Request-ID"] = request_id
-        response.headers["X-Response-Time"] = str(round((time.time() - start_time) * 1000, 2))
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
+        headers = {
+            "X-Request-ID": request_id,
+            "X-Response-Time": str(round((time.time() - start_time) * 1000, 2)),
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
+            "X-XSS-Protection": "1; mode=block"
+        }
+        
+        for key, value in headers.items():
+            response.headers[key] = value
         
         return response
 
@@ -189,11 +196,16 @@ class CORSMiddleware(BaseHTTPMiddleware):
     
     def _add_cors_headers(self, response: Response):
         """Add CORS headers to response."""
-        response.headers["Access-Control-Allow-Origin"] = ", ".join(self.settings.cors_origins)
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
-        response.headers["Access-Control-Allow-Credentials"] = str(self.settings.cors_allow_credentials).lower()
-        response.headers["Access-Control-Max-Age"] = "86400"  # 24 hours
+        cors_headers = {
+            "Access-Control-Allow-Origin": ", ".join(self.settings.cors_origins),
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+            "Access-Control-Allow-Credentials": str(self.settings.cors_allow_credentials).lower(),
+            "Access-Control-Max-Age": "86400"  # 24 hours
+        }
+        
+        for key, value in cors_headers.items():
+            response.headers[key] = value
 
 
 class ErrorHandlingMiddleware(BaseHTTPMiddleware):
@@ -254,8 +266,7 @@ async def get_current_user(
         )
 
     auth_service = await get_auth_service()
-    token = credentials.credentials
-    auth_result = await auth_service.get_current_user(token)
+    auth_result = await auth_service.get_current_user(credentials.credentials)
 
     if not auth_result.success:
         raise HTTPException(

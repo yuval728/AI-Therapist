@@ -1,7 +1,7 @@
 """Enhanced flow handlers with improved error handling and monitoring."""
 from typing import Dict, Any, Optional
 from langchain_core.messages import HumanMessage, AIMessage
-from src.therapy.memory.memory_manager import append_to_memory, save_to_long_term_memory
+from src.therapy.memory.memory_manager import get_memory_manager
 from src.config.constants import ResponseMessages, ClassificationResults
 from src.models.enums import AttackType, EmotionType, CrisisLevel
 from src.core import moderate_input, moderate_output, detect_pii_enhanced
@@ -86,7 +86,7 @@ class ResponseHandler:
     
     @staticmethod
     @timing_decorator("create_blocked_response")
-    def create_blocked_response(
+    async def create_blocked_response(
         state: Dict[str, Any], 
         message: str, 
         response_type: str = "blocked"
@@ -97,7 +97,11 @@ class ResponseHandler:
         
         try:
             ai_message = AIMessage(content=message)
-            state = append_to_memory(state, ai_message, role="assistant")
+            try:
+                memory_manager = await get_memory_manager()
+                state = await memory_manager.append_to_memory(state, ai_message, role="assistant")
+            except Exception:
+                pass  # Continue without memory if it fails
             
             # Log blocked response
             log_therapy_event(

@@ -2,14 +2,20 @@
 import uvicorn
 import sys
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables first
+load_dotenv()
 
 # Add src to Python path
 sys.path.append(str(Path(__file__).parent / "src"))
 
-from src.config import get_settings
-
-from dotenv import load_dotenv  
-load_dotenv()
+try:
+    from src.config import get_settings
+    print("✓ Configuration loaded successfully")
+except ImportError as e:
+    print(f"✗ Failed to import configuration: {e}")
+    sys.exit(1)
 
 def main():
     """Run the development server."""

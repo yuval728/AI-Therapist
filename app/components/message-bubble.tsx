@@ -1,7 +1,7 @@
 "use client"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Brain, User } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn, formatTimestamp } from "@/lib/utils"
 import { motion } from "framer-motion"
 import { StreamingText } from "./streaming-text"
 
@@ -87,9 +87,6 @@ export function MessageBubble({
             <StreamingText
               content={message}
               isStreaming={true}
-              onComplete={() => {
-                // Handle streaming completion if needed
-              }}
             />
           ) : (
             <motion.p
@@ -109,7 +106,7 @@ export function MessageBubble({
           transition={{ delay: 0.3 }}
           className="text-xs text-muted-foreground mt-1 px-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
         >
-          {new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          {formatTimestamp(timestamp)}
         </motion.span>
       </div>
 

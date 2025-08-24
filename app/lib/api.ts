@@ -78,16 +78,18 @@ class ApiClient {
       localStorage.setItem("user", JSON.stringify(tokens.user))
 
       // Set HTTP-only cookie for middleware
-      document.cookie = `access_token=${tokens.access_token}; path=/; max-age=${7 * 24 * 60 * 60}; samesite=strict`
+      const maxAge = 7 * 24 * 60 * 60 // 7 days
+      document.cookie = `access_token=${tokens.access_token}; path=/; max-age=${maxAge}; samesite=strict`
     }
   }
 
   private removeTokens(): void {
     if (typeof window !== "undefined") {
-      localStorage.removeItem("access_token")
-      localStorage.removeItem("refresh_token")
-      localStorage.removeItem("user")
+      const keysToRemove = ["access_token", "refresh_token", "user"]
+      keysToRemove.forEach(key => localStorage.removeItem(key))
+      
       document.cookie = "access_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT"
+      
       // Notify listeners (e.g., useAuth) that auth tokens were cleared
       try {
         window.dispatchEvent(new Event("auth:logout"))
@@ -143,16 +145,10 @@ class ApiClient {
       return mockTokens
     }
 
-    const response = await fetch(`${API_BASE_URL}/auth/signin`, {
+    const response = await this.makeRequest(`${API_BASE_URL}/auth/signin`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
     })
-
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.message || "Sign in failed")
-    }
 
     const apiResponse: APIResponse<any> = await response.json()
     if (!apiResponse.success || !apiResponse.data) {
@@ -165,15 +161,7 @@ class ApiClient {
       throw new Error("Invalid signin response")
     }
 
-    const flattened: AuthTokens = {
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token,
-      user: {
-        id: user.id,
-        email: user.email,
-      },
-    }
-
+    const flattened: AuthTokens = this.createAuthTokens(tokens, user)
     this.setTokens(flattened)
     return flattened
   }
@@ -195,41 +183,29 @@ class ApiClient {
       return mockTokens
     }
 
-    // Backend expects refresh_token as query parameter, not JSON body
-    const response = await fetch(`${API_BASE_URL}/auth/refresh?refresh_token=${encodeURIComponent(refreshToken)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    })
+    try {
+      const response = await this.makeRequest(
+        `${API_BASE_URL}/auth/refresh?refresh_token=${encodeURIComponent(refreshToken)}`,
+        { method: "POST" }
+      )
 
-    if (!response.ok) {
+      const apiResponse: APIResponse<any> = await response.json()
+      if (!apiResponse.success || !apiResponse.data) {
+        throw new Error("Token refresh failed")
+      }
+
+      const { user, tokens } = apiResponse.data
+      if (!tokens?.access_token || !tokens?.refresh_token || !user) {
+        throw new Error("Invalid refresh response")
+      }
+
+      const flattened = this.createAuthTokens(tokens, user)
+      this.setTokens(flattened)
+      return flattened
+    } catch (error) {
       this.removeTokens()
-      throw new Error("Token refresh failed")
+      throw error
     }
-
-    const apiResponse: APIResponse<any> = await response.json()
-    if (!apiResponse.success || !apiResponse.data) {
-      this.removeTokens()
-      throw new Error("Token refresh failed")
-    }
-
-    // Response shape mirrors signin
-    const { user, tokens } = apiResponse.data
-    if (!tokens?.access_token || !tokens?.refresh_token || !user) {
-      this.removeTokens()
-      throw new Error("Invalid refresh response")
-    }
-
-    const flattened: AuthTokens = {
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token,
-      user: {
-        id: user.id,
-        email: user.email,
-      },
-    }
-
-    this.setTokens(flattened)
-    return flattened
   }
 
   async getCurrentUser(): Promise<User> {
@@ -408,6 +384,31 @@ class ApiClient {
         throw new Error("Session expired")
       }
       throw new Error(`Request failed: ${response.statusText}`)
+    }
+
+    return response
+  }
+
+  private createAuthTokens(tokens: any, user: any): AuthTokens {
+    return {
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      user: {
+        id: user.id,
+        email: user.email,
+      },
+    }
+  }
+
+  private async makeRequest(url: string, options: RequestInit = {}): Promise<Response> {
+    const response = await fetch(url, {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    })
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: response.statusText }))
+      throw new Error(error.message || `Request failed: ${response.statusText}`)
     }
 
     return response

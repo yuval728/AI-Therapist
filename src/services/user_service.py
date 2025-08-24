@@ -13,6 +13,30 @@ class UserService:
     def __init__(self):
         self.supabase_client = None
     
+    def _build_user_from_data(self, user_data: Dict[str, Any]) -> User:
+        """Build User object from database data."""
+        return User(
+            id=user_data["id"],
+            email=user_data["email"],
+            full_name=user_data.get("full_name"),
+            preferences=user_data.get("preferences", {}),
+            created_at=datetime.fromisoformat(user_data["created_at"].replace('Z', '+00:00')),
+            updated_at=datetime.fromisoformat(user_data["updated_at"].replace('Z', '+00:00'))
+        )
+    
+    def _handle_error(self, event: str, user_id: str, error: Exception, message: str) -> APIResponse:
+        """Handle errors consistently with logging."""
+        log_therapy_event(
+            event=event,
+            user_id=user_id,
+            error=str(error)
+        )
+        return APIResponse(
+            success=False,
+            error=message,
+            error_code="INTERNAL_ERROR"
+        )
+    
     async def _ensure_initialized(self):
         """Ensure database client is initialized."""
         if self.supabase_client is None:
@@ -34,14 +58,7 @@ class UserService:
                 )
             
             profile_data = result.data[0]
-            profile = User(
-                id=profile_data["id"],
-                email=profile_data["email"],
-                full_name=profile_data.get("full_name"),
-                preferences=profile_data.get("preferences", {}),
-                created_at=datetime.fromisoformat(profile_data["created_at"].replace('Z', '+00:00')),
-                updated_at=datetime.fromisoformat(profile_data["updated_at"].replace('Z', '+00:00'))
-            )
+            profile = self._build_user_from_data(profile_data)
             
             return APIResponse(
                 success=True,
@@ -49,16 +66,7 @@ class UserService:
             )
             
         except Exception as e:
-            log_therapy_event(
-                event="get_profile_error",
-                user_id=user_id,
-                error=str(e)
-            )
-            return APIResponse(
-                success=False,
-                error="Failed to retrieve user profile",
-                error_code="INTERNAL_ERROR"
-            )
+            return self._handle_error("user_profile_retrieval_failed", user_id, e, "Failed to retrieve user profile")
     
     @timing_decorator("user_update_profile")
     async def update_user_profile(

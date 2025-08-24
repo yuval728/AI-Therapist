@@ -16,13 +16,11 @@ export function useAuth() {
   useEffect(() => {
     checkAuth()
 
-    // React to explicit logout events dispatched by apiClient.removeTokens()
     const handleAuthLogout = () => {
       setUser(null)
       setError(null)
     }
 
-    // React to storage changes (e.g., other tabs or backend-triggered removals)
     const handleStorage = (e: StorageEvent) => {
       if (e.key === "access_token" && !e.newValue) {
         setUser(null)
@@ -30,17 +28,22 @@ export function useAuth() {
       }
     }
 
-    if (typeof window !== "undefined") {
-      window.addEventListener("auth:logout", handleAuthLogout)
-      window.addEventListener("storage", handleStorage)
+    const setupEventListeners = () => {
+      if (typeof window !== "undefined") {
+        window.addEventListener("auth:logout", handleAuthLogout)
+        window.addEventListener("storage", handleStorage)
+      }
     }
 
-    return () => {
+    const cleanupEventListeners = () => {
       if (typeof window !== "undefined") {
         window.removeEventListener("auth:logout", handleAuthLogout)
         window.removeEventListener("storage", handleStorage)
       }
     }
+
+    setupEventListeners()
+    return cleanupEventListeners
   }, [])
 
   const checkAuth = async () => {
@@ -78,9 +81,7 @@ export function useAuth() {
     try {
       setError(null)
       setLoading(true)
-      // Backend signup returns success without logging in
       const result = await apiClient.signup(email, password, fullName)
-      // Do not set user here; prompt user to log in next
       return result
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Signup failed"

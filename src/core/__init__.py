@@ -2,7 +2,7 @@
 from .llm_utils import (
     LLMClient,
     CompletionRequest,
-    async_completion,
+    get_completion,
     chat_completion,
     classify_text,
     get_llm_stats
@@ -28,7 +28,7 @@ __all__ = [
     # LLM utilities
     "LLMClient",
     "CompletionRequest",
-    "async_completion",
+    "get_completion",
     "chat_completion",
     "classify_text",
     "get_llm_stats",

@@ -27,6 +27,14 @@ interface StreamingState {
   }
 }
 
+const createChatMessage = (role: "user" | "assistant", content: string, extra?: Partial<ChatMessage>): ChatMessage => ({
+  id: `msg-${Date.now()}`,
+  role,
+  content,
+  timestamp: new Date().toISOString(),
+  ...extra,
+})
+
 export function useWebSocketChat(sessionId?: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected")
@@ -185,12 +193,7 @@ export function useWebSocketChat(sessionId?: string) {
         }
 
         // Add user message immediately
-        const userMessage: ChatMessage = {
-          id: `msg-${Date.now()}`,
-          role: "user",
-          content,
-          timestamp: new Date().toISOString(),
-        }
+        const userMessage = createChatMessage("user", content)
 
         setMessages((prev) => [...prev, userMessage])
         setError(null)

@@ -3,12 +3,7 @@ from src.therapy.tools import emotion_tool, crisis_tool
 from src.core import chat_completion
 from src.models import TherapyState
 from langchain_core.messages import HumanMessage, AIMessage
-from src.therapy.memory.memory_manager import (
-    append_to_memory,
-    get_memory,
-    search_long_term_memory,
-    prune_messages,
-)
+from src.therapy.memory.memory_manager import get_memory_manager
 from src.config import get_settings
 from src.config.constants import NodeNames, ClassificationResults, SystemPrompts, Limits
 from src.therapy.flow_handlers import (
@@ -34,16 +29,17 @@ async def therapy_node(state: TherapyState) -> TherapyState:
     user_input = state["input"]
     
     try:
-        # Prepare conversation history
-        state = prune_messages(state)
-        history = get_memory(state, from_db=False)
-        conversation_history = []
-        for m in history:
-            role = "user" if m.type == 'human' else 'assistant'
-            conversation_history.append({"role": role, "content": m.content})
+        # Use memory manager for conversation history and relevant memories
+        memory_manager = await get_memory_manager()
+        state = await memory_manager.prune_messages(state)
+        history = await memory_manager.get_memory(state, from_db=False)
+        conversation_history = [
+            {"role": "user" if m.type == 'human' else 'assistant', "content": m.content}
+            for m in history
+        ]
         
         # Get relevant memories
-        relevant_docs = search_long_term_memory(user_id, user_input)
+        relevant_docs = await memory_manager.search_long_term_memory(user_id, user_input)
         relevant_memories = [doc.page_content for doc in relevant_docs]
         
         # Get session summary if available
@@ -61,8 +57,8 @@ async def therapy_node(state: TherapyState) -> TherapyState:
         )
         
         # Update memory
-        state = append_to_memory(state, HumanMessage(content=user_input), role="user")
-        state = append_to_memory(state, AIMessage(content=result["response"]), role="assistant")
+        state = await memory_manager.append_to_memory(state, HumanMessage(content=user_input), role="user")
+        state = await memory_manager.append_to_memory(state, AIMessage(content=result["response"]), role="assistant")
         
         # Update state with analysis results
         updated_state = {
@@ -84,10 +80,14 @@ async def therapy_node(state: TherapyState) -> TherapyState:
             session_id=session_id,
             error=str(e)
         )
-        # Fallback response
+        # Fallback response with memory manager
         fallback_response = "I'm here to support you. Could you tell me more about what's on your mind?"
-        state = append_to_memory(state, HumanMessage(content=user_input), role="user")
-        state = append_to_memory(state, AIMessage(content=fallback_response), role="assistant")
+        try:
+            memory_manager = await get_memory_manager()
+            state = await memory_manager.append_to_memory(state, HumanMessage(content=user_input), role="user")
+            state = await memory_manager.append_to_memory(state, AIMessage(content=fallback_response), role="assistant")
+        except Exception:
+            pass  # Continue with fallback even if memory fails
         return {**state, "response": fallback_response}
 
 @timing_decorator("emotion_analysis")

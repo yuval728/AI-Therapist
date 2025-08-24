@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -9,7 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { apiClient } from "@/lib/api"
 import { Activity, Server, Wifi, RefreshCw, CheckCircle, XCircle, AlertTriangle, Loader2 } from "lucide-react"
 import { motion } from "framer-motion"
-import { cn } from "@/lib/utils"
+import { cn, formatTimestamp } from "@/lib/utils"
 
 interface HealthData {
   status: string
@@ -23,14 +23,7 @@ export function HealthStatus() {
   const [error, setError] = useState<string | null>(null)
   const [lastChecked, setLastChecked] = useState<Date | null>(null)
 
-  useEffect(() => {
-    checkHealth()
-    // Auto-refresh every 30 seconds
-    const interval = setInterval(checkHealth, 30000)
-    return () => clearInterval(interval)
-  }, [])
-
-  const checkHealth = async () => {
+  const checkHealth = useCallback(async () => {
     try {
       setError(null)
       const healthData = await apiClient.getHealthStatus()
@@ -42,44 +35,47 @@ export function HealthStatus() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
-  const getStatusConfig = (status: string) => {
-    switch (status.toLowerCase()) {
-      case "healthy":
-        return {
-          icon: CheckCircle,
-          color: "text-green-600",
-          bgColor: "bg-green-500/10",
-          borderColor: "border-green-500/20",
-          label: "Healthy",
-        }
-      case "degraded":
-        return {
-          icon: AlertTriangle,
-          color: "text-yellow-600",
-          bgColor: "bg-yellow-500/10",
-          borderColor: "border-yellow-500/20",
-          label: "Degraded",
-        }
-      case "unhealthy":
-        return {
-          icon: XCircle,
-          color: "text-red-600",
-          bgColor: "bg-red-500/10",
-          borderColor: "border-red-500/20",
-          label: "Unhealthy",
-        }
-      default:
-        return {
-          icon: AlertTriangle,
-          color: "text-gray-600",
-          bgColor: "bg-gray-500/10",
-          borderColor: "border-gray-500/20",
-          label: "Unknown",
-        }
+  useEffect(() => {
+    checkHealth()
+    const interval = setInterval(checkHealth, 30000)
+    return () => clearInterval(interval)
+  }, [checkHealth])
+
+  const getStatusConfig = useCallback((status: string) => {
+    const configs = {
+      healthy: {
+        icon: CheckCircle,
+        color: "text-green-600",
+        bgColor: "bg-green-500/10",
+        borderColor: "border-green-500/20",
+        label: "Healthy",
+      },
+      degraded: {
+        icon: AlertTriangle,
+        color: "text-yellow-600",
+        bgColor: "bg-yellow-500/10",
+        borderColor: "border-yellow-500/20",
+        label: "Degraded",
+      },
+      unhealthy: {
+        icon: XCircle,
+        color: "text-red-600",
+        bgColor: "bg-red-500/10",
+        borderColor: "border-red-500/20",
+        label: "Unhealthy",
+      },
+    } as const
+
+    return configs[status.toLowerCase() as keyof typeof configs] || {
+      icon: AlertTriangle,
+      color: "text-gray-600",
+      bgColor: "bg-gray-500/10",
+      borderColor: "border-gray-500/20",
+      label: "Unknown",
     }
-  }
+  }, [])
 
   const statusConfig = health ? getStatusConfig(health.status) : null
 
@@ -148,14 +144,14 @@ export function HealthStatus() {
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Last Updated</span>
                     <span className="text-foreground font-medium">
-                      {new Date(health.timestamp).toLocaleTimeString()}
+                      {formatTimestamp(health.timestamp)}
                     </span>
                   </div>
 
                   {lastChecked && (
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Last Checked</span>
-                      <span className="text-foreground font-medium">{lastChecked.toLocaleTimeString()}</span>
+                      <span className="text-foreground font-medium">{formatTimestamp(lastChecked.toISOString())}</span>
                     </div>
                   )}
                 </div>
