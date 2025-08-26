@@ -58,6 +58,9 @@ export function AppShell() {
     sendMessage,
     disconnect,
     getSessionId,
+    loadOlderMessages,
+    historyLoading,
+    hasMoreHistory,
   } = useWebSocketChat(activeSessionId || undefined)
 
   // Initialize sessions on mount (only once)
@@ -278,6 +281,9 @@ export function AppShell() {
               connectionStatus={connectionStatus}
               error={chatError}
               activeSession={getActiveSession()}
+              onLoadOlder={loadOlderMessages}
+              hasMoreHistory={hasMoreHistory}
+              historyLoading={historyLoading}
             />
           </div>
 

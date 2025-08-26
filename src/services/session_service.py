@@ -291,13 +291,16 @@ class SessionService:
         
         try:
             pagination = pagination or PaginationParams()
-            
+
+            # Fetch paginated messages in ascending order for natural chat history
             result = await self.supabase_client.get_memory_logs(
                 user_id=user_id,
                 session_id=session_id,
-                limit=pagination.limit
+                limit=pagination.limit,
+                offset=pagination.offset,
+                order="asc",
             )
-            
+
             if not result.success:
                 return APIResponse(
                     success=False,
@@ -307,12 +310,30 @@ class SessionService:
             
             messages = [self._build_message_from_data(data) for data in result.data]
             
+            # Retrieve total count for pagination UI
+            try:
+                count_result = (
+                    self.supabase_client.client.table("memory_logs")
+                    .select("count", count="exact")
+                    .eq("user_id", user_id)
+                    .eq("session_id", session_id)
+                    .execute()
+                )
+                total_count = getattr(count_result, "count", 0) or 0
+            except Exception:
+                total_count = pagination.offset + len(messages)
+
+            has_more = (pagination.offset + len(messages)) < total_count
+
             return APIResponse(
                 success=True,
                 data=messages,
                 metadata={
-                    "total": len(messages),
-                    "session_id": session_id
+                    "total": total_count,
+                    "offset": pagination.offset,
+                    "limit": pagination.limit,
+                    "has_more": has_more,
+                    "session_id": session_id,
                 }
             )
             
@@ -475,16 +496,35 @@ class SessionService:
             if ts_raw else datetime.now(timezone.utc)
         )
         
+        # Normalize message_type to match SessionMessage.pattern('^(user|assistant|system)$')
+        raw_type = str(msg_data.get("message_type") or msg_data.get("role") or "user").lower()
+        if raw_type in {"user_input", "user"}:
+            norm_type = "user"
+        elif raw_type in {"ai_response", "assistant"}:
+            norm_type = "ai_response"
+        elif raw_type in {"system", "system_message"}:
+            norm_type = "system_message"
+        else:
+            # Fallback based on role field if present
+            role_field = str(msg_data.get("role") or "user").lower()
+            norm_type = role_field if role_field in {"user", "ai_response", "system_message"} else "user"
+
+        # Map emotion to EmotionType if available
+        emotion_val = msg_data.get("emotion")
+        emotion_enum = EmotionType(emotion_val) if emotion_val else None
+
+        # Build pydantic model with required fields
         return SessionMessage(
-            role=msg_data["role"],
+            session_id=msg_data.get("session_id"),
+            user_id=msg_data.get("user_id"),
             content=msg_data["content"],
-            message_type=MessageType(msg_data.get("message_type", "user_input")),
-            emotion=(
-                EmotionType(msg_data.get("emotion", "neutral")) 
-                if msg_data.get("emotion") else None
-            ),
-            timestamp=ts,
-            metadata=msg_data.get("metadata", {})
+            message_type=norm_type,
+            emotion_detected=emotion_enum,
+            # Optional extras when present
+            emotion_confidence=msg_data.get("emotion_confidence"),
+            attack_detected=msg_data.get("attack_detected"),
+            is_flagged=bool(msg_data.get("is_flagged", False)),
+            processing_time_ms=msg_data.get("processing_time_ms"),
         )
     
     def _validate_and_normalize_updates(self, updates: Dict[str, Any]) -> Dict[str, Any]:

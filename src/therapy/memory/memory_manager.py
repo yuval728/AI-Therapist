@@ -76,7 +76,7 @@ class MemoryManager:
         
         try:
             # Prepare data for database save
-            message_type = MessageType.USER_INPUT if role == "user" else MessageType.AI_RESPONSE
+            message_type = MessageType.USER if role == "user" else MessageType.ASSISTANT
             emotion = EmotionType(state.get("emotion")) if state.get("emotion") else None
             crisis_level = CrisisLevel(state.get("crisis_level")) if state.get("crisis_level") else None
             

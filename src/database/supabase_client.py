@@ -277,18 +277,30 @@ class SupabaseClient:
         except Exception as e:
             log_event(
                 event="memory_log_save_failed",
-                user_id=user_id, session_id=session_id, error=str(e)
+                user_id=user_id,
+                session_id=session_id,
+                error=str(e)
             )
             return QueryResult(data=[], error=str(e), success=False)
-    
+
     @timing_decorator("get_memory_logs")
     async def get_memory_logs(
         self,
         user_id: str,
         session_id: Optional[str] = None,
-        limit: int = 10
+        limit: int = 10,
+        offset: int = 0,
+        order: str = "desc",
     ) -> QueryResult:
-        """Get memory logs for user."""
+        """Get memory logs for a user/session with pagination.
+
+        Args:
+            user_id: The user id.
+            session_id: Filter by session id.
+            limit: Page size.
+            offset: Zero-based offset for pagination.
+            order: 'asc' or 'desc' by timestamp.
+        """
         self._ensure_initialized()
         
         try:
@@ -297,7 +309,14 @@ class SupabaseClient:
             if session_id:
                 query = query.eq("session_id", session_id)
             
-            result = query.order("timestamp", desc=True).limit(limit).execute()
+            desc_flag = False if str(order).lower() == "asc" else True
+            # Use range for offset pagination and stable ordering by timestamp
+            result = (
+                query
+                .order("timestamp", desc=desc_flag)
+                .range(offset, offset + limit - 1)
+                .execute()
+            )
             return self._process_query_result(result)
             
         except Exception as e:

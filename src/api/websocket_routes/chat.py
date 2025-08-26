@@ -197,7 +197,7 @@ async def handle_therapy_message(user_id: str, session_id: str, message: Dict[st
         initial_state = {
             "user_id": user_id,
             "session_id": session_id,
-            "user_input": user_input,
+            "input": user_input,
             "messages": [],
             "emotion": "neutral",
             "crisis_level": "none",

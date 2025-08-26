@@ -44,6 +44,10 @@ export function useWebSocketChat(sessionId?: string) {
     isStreaming: false,
   })
   const [error, setError] = useState<string | null>(null)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [pageSize] = useState(20)
+  const [totalMessages, setTotalMessages] = useState<number>(0)
+  const [offset, setOffset] = useState<number>(0) // current window start offset (for ascending order)
 
   const wsClient = useRef<WebSocketClient | null>(null)
   const connectingRef = useRef(false)
@@ -123,6 +127,37 @@ export function useWebSocketChat(sessionId?: string) {
     [toast],
   )
 
+  // Load older messages (prepend)
+  const loadOlderMessages = useCallback(async () => {
+    if (!sessionId) return
+    if (historyLoading) return
+    if (offset <= 0) return
+    try {
+      setHistoryLoading(true)
+      const prevOffset = Math.max(0, offset - pageSize)
+      const pageLimit = offset - prevOffset || pageSize
+      const page = await apiClient.getSessionMessagesPaged(sessionId, prevOffset, pageLimit)
+      const older = page.messages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        timestamp: m.created_at,
+        emotion: m.emotion,
+        crisis_level: m.crisis_level,
+        mode: m.mode,
+        metadata: m.metadata,
+      }))
+      setMessages((prev) => [...older, ...prev])
+      setOffset(prevOffset)
+      setTotalMessages(page.total)
+    } catch (err) {
+      console.error("[v0] failed to load older messages:", err)
+      setError(err instanceof Error ? err.message : "Failed to load older messages")
+    } finally {
+      setHistoryLoading(false)
+    }
+  }, [sessionId, historyLoading, offset, pageSize])
+
   const handleConnectionChange = useCallback((status: ConnectionStatus) => {
     setConnectionStatus(status)
     if (status === "connected") {
@@ -179,6 +214,64 @@ export function useWebSocketChat(sessionId?: string) {
       connectingRef.current = false
     }
   }, [sessionId, handleWebSocketMessage, handleConnectionChange, handleError])
+
+  // Load initial history when session changes
+  useEffect(() => {
+    const loadInitial = async () => {
+      if (!sessionId) {
+        setMessages([])
+        setTotalMessages(0)
+        setOffset(0)
+        return
+      }
+      try {
+        setHistoryLoading(true)
+        // First page to discover total
+        const first = await apiClient.getSessionMessagesPaged(sessionId, 0, pageSize)
+        let startOffset = 0
+        if (first.total > pageSize) {
+          startOffset = first.total - pageSize
+          const lastPage = await apiClient.getSessionMessagesPaged(sessionId, startOffset, pageSize)
+          setMessages(
+            lastPage.messages.map((m) => ({
+              id: m.id,
+              role: m.role,
+              content: m.content,
+              timestamp: m.created_at,
+              emotion: m.emotion,
+              crisis_level: m.crisis_level,
+              mode: m.mode,
+              metadata: m.metadata,
+            })),
+          )
+          setTotalMessages(lastPage.total)
+          setOffset(startOffset)
+        } else {
+          setMessages(
+            first.messages.map((m) => ({
+              id: m.id,
+              role: m.role,
+              content: m.content,
+              timestamp: m.created_at,
+              emotion: m.emotion,
+              crisis_level: m.crisis_level,
+              mode: m.mode,
+              metadata: m.metadata,
+            })),
+          )
+          setTotalMessages(first.total)
+          setOffset(0)
+        }
+      } catch (err) {
+        console.error("[v0] failed to load initial history:", err)
+        setError(err instanceof Error ? err.message : "Failed to load history")
+      } finally {
+        setHistoryLoading(false)
+      }
+    }
+    loadInitial()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId])
 
   const sendMessage = useCallback(
     async (content: string) => {
@@ -238,5 +331,9 @@ export function useWebSocketChat(sessionId?: string) {
     sendMessage,
     disconnect,
     getSessionId,
+    // history
+    loadOlderMessages,
+    historyLoading,
+    hasMoreHistory: offset > 0,
   }
 }

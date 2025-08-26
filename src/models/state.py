@@ -1,5 +1,5 @@
 """State models for therapy session management."""
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, TypedDict
 from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 from langchain_core.messages import BaseMessage
@@ -7,23 +7,23 @@ from .base import BaseEntity, TimestampMixin
 from .enums import AttackType, SessionMode, EmotionType, CrisisLevel, ProcessingStatus
 
 
-class TherapyState(BaseModel):
+class TherapyState(TypedDict):
     """Core state for therapy graph execution."""
     user_id: str
     session_id: str
     input: str
-    messages: List[BaseMessage]
-    response: Optional[str]
-    relevant_memories: Optional[List[str]]
-    emotion: Optional[str]
-    emotion_confidence: Optional[float]
-    is_crisis: Optional[bool]
-    crisis_level: Optional[str]
-    mode: Optional[str]
-    journal_entry: Optional[str]
-    attack: Optional[str]
-    summary: Optional[str]
-    metadata: Optional[Dict[str, Any]]
+    messages: List[BaseMessage] = Field(default_factory=list)
+    response: Optional[str] = None
+    relevant_memories: Optional[List[str]] = None
+    emotion: Optional[str] = None
+    emotion_confidence: Optional[float] = None
+    is_crisis: Optional[bool] = None
+    crisis_level: Optional[str] = None
+    mode: Optional[str] = None
+    journal_entry: Optional[str] = None
+    attack: Optional[str] = None
+    summary: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
 class TherapySession(BaseEntity):
@@ -55,7 +55,7 @@ class SessionMessage(BaseEntity):
     session_id: str = Field(..., description="Parent session ID")
     user_id: str = Field(..., description="User identifier")
     content: str = Field(..., min_length=1, max_length=5000)
-    message_type: str = Field(..., pattern=r'^(user|assistant|system)$')
+    message_type: str = Field(..., pattern=r'^(user|assistant|system|ai_response|journal_entry)$')
     emotion_detected: Optional[EmotionType] = None
     emotion_confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
     attack_detected: Optional[AttackType] = None

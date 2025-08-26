@@ -1,11 +1,15 @@
 """Enhanced flow handlers with improved error handling and monitoring."""
 from typing import Dict, Any, Optional
 from langchain_core.messages import HumanMessage, AIMessage
-from src.therapy.memory.memory_manager import get_memory_manager
+from src.therapy.memory.memory_manager import (
+    get_memory_manager,
+    append_to_memory,
+    save_to_long_term_memory,
+)
 from src.config.constants import ResponseMessages, ClassificationResults
-from src.models.enums import AttackType, EmotionType, CrisisLevel
+from src.models.enums import AttackType, EmotionType, CrisisLevel, MessageType
 from src.core import moderate_input, moderate_output, detect_pii_enhanced
-from src.utils import log_therapy_event, timing_decorator, ValidationError
+from src.utils import log_therapy_event, timing_decorator
 
 
 class InputHandler:
@@ -31,10 +35,8 @@ class InputHandler:
                 attack_type=moderation_result.attack_type.value,
                 confidence=moderation_result.confidence,
                 is_safe=moderation_result.is_safe
-            )
-            
+            )            
             return {**state, "attack": moderation_result.attack_type.value}
-            
         except Exception as e:
             log_therapy_event(
                 event="input_moderation_failed",

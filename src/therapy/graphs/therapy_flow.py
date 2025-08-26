@@ -31,7 +31,7 @@ async def therapy_node(state: TherapyState) -> TherapyState:
     try:
         # Use memory manager for conversation history and relevant memories
         memory_manager = await get_memory_manager()
-        state = await memory_manager.prune_messages(state)
+        state = memory_manager.prune_messages(state)
         history = await memory_manager.get_memory(state, from_db=False)
         conversation_history = [
             {"role": "user" if m.type == 'human' else 'assistant', "content": m.content}
@@ -39,8 +39,8 @@ async def therapy_node(state: TherapyState) -> TherapyState:
         ]
         
         # Get relevant memories
-        relevant_docs = await memory_manager.search_long_term_memory(user_id, user_input)
-        relevant_memories = [doc.page_content for doc in relevant_docs]
+        search_result = await memory_manager.search_long_term_memory(user_id, user_input)
+        relevant_memories = [doc.page_content for doc in search_result.documents]
         
         # Get session summary if available
         session_summary = state.get("summary")
@@ -218,7 +218,7 @@ def _add_routing_edges(graph):
     # Input moderation routing
     graph.add_conditional_edges(
         NodeNames.CHECK_INPUT_MODERATION,
-        lambda state: state["attack"],
+        lambda state: state.get("attack", ClassificationResults.SAFE),
         {
             ClassificationResults.SAFE: NodeNames.CHECK_PII,
             "blocked": NodeNames.HANDLE_BLOCKED,

@@ -40,6 +40,10 @@ interface ChatAreaProps {
   connectionStatus: ConnectionStatus
   error: string | null
   activeSession: TherapySession | null
+  // Pagination controls
+  onLoadOlder?: () => Promise<void> | void
+  hasMoreHistory?: boolean
+  historyLoading?: boolean
 }
 
 export function ChatArea({
@@ -50,6 +54,9 @@ export function ChatArea({
   connectionStatus,
   error,
   activeSession,
+  onLoadOlder,
+  hasMoreHistory,
+  historyLoading,
 }: ChatAreaProps) {
   const isConnected = connectionStatus === "connected"
   // Allow typing even when disconnected; sendMessage will lazy-connect
@@ -96,8 +103,21 @@ export function ChatArea({
         </motion.div>
       )}
 
-      {/* Messages */}
+      {/* Messages with Load Older */}
       <div className="flex-1 overflow-hidden">
+        <div className="px-4 pt-4">
+          {hasMoreHistory && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={historyLoading}
+              onClick={() => onLoadOlder && onLoadOlder()}
+              className="w-full mb-2"
+            >
+              {historyLoading ? "Loading..." : "Load older messages"}
+            </Button>
+          )}
+        </div>
         <MessageList messages={allMessages} isTyping={isTyping && !streamingState.isStreaming} />
       </div>
 

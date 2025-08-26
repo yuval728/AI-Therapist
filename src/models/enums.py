@@ -51,10 +51,10 @@ class CrisisLevel(str, Enum):
 
 class MessageType(str, Enum):
     """Types of messages in therapy sessions."""
-    USER = "user"
-    ASSISTANT = "assistant"
-    SYSTEM = "system"
-    TOOL = "tool"
+    USER = "user_input"
+    ASSISTANT = "ai_response"
+    SYSTEM = "system_message"
+    JOURNAL = "journal_entry"
 
 
 class ProcessingStatus(str, Enum):

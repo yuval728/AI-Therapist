@@ -313,17 +313,17 @@ class ApiClient {
     )
     // Backend returns messages using FastAPI/Pydantic model `SessionMessage`
     // with fields: id, session_id, user_id, content, message_type, emotion_detected, created_at, ...
-    const apiResponse: APIResponse<any[]> = await response.json()
+    const apiResponse: APIResponse<any> = await response.json()
 
     if (!apiResponse.success || !apiResponse.data) {
       throw new Error(apiResponse.message || "Failed to get session messages")
     }
 
     // Map backend fields to frontend `SessionMessage` shape
-    const mapped: SessionMessage[] = apiResponse.data.map((m: any) => ({
+    const mapped: SessionMessage[] = (apiResponse.data as any[]).map((m: any) => ({
       id: m.id,
       session_id: m.session_id,
-      role: (m.message_type === "assistant" || m.message_type === "system") ? "assistant" : "user",
+      role: (m.message_type === "ai_response" || m.message_type === "system_message") ? "assistant" : "user",
       content: m.content,
       emotion: m.emotion_detected ?? m.emotion,
       crisis_level: m.crisis_level, // may be undefined if not provided by backend
@@ -333,6 +333,48 @@ class ApiClient {
     }))
 
     return mapped
+  }
+
+  // New: fetch messages with pagination metadata
+  async getSessionMessagesPaged(
+    sessionId: string,
+    offset = 0,
+    limit = 50,
+  ): Promise<{ messages: SessionMessage[]; total: number; has_more: boolean; offset: number; limit: number }> {
+    if (isDemoMode) {
+      const demo = await this.getSessionMessages(sessionId, offset, limit)
+      return { messages: demo, total: demo.length, has_more: false, offset, limit }
+    }
+
+    const response = await this.fetchWithAuth(
+      `${API_BASE_URL}/sessions/${sessionId}/messages?offset=${offset}&limit=${limit}`,
+    )
+    const apiResponse: APIResponse<any> = await response.json()
+
+    if (!apiResponse.success || !apiResponse.data) {
+      throw new Error(apiResponse.message || "Failed to get session messages")
+    }
+
+    const meta = (apiResponse as any).metadata || {}
+    const mapped: SessionMessage[] = (apiResponse.data as any[]).map((m: any) => ({
+      id: m.id,
+      session_id: m.session_id,
+      role: (m.message_type === "ai_response" || m.message_type === "system_message") ? "assistant" : "user",
+      content: m.content,
+      emotion: m.emotion_detected ?? m.emotion,
+      crisis_level: m.crisis_level,
+      mode: m.mode,
+      metadata: m.metadata,
+      created_at: m.created_at,
+    }))
+
+    return {
+      messages: mapped,
+      total: typeof meta.total === "number" ? meta.total : mapped.length,
+      has_more: Boolean(meta.has_more),
+      offset: typeof meta.offset === "number" ? meta.offset : offset,
+      limit: typeof meta.limit === "number" ? meta.limit : limit,
+    }
   }
 
   async getHealthStatus(): Promise<{ status: string; timestamp: string; service: string }> {
