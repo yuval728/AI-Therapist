@@ -3,7 +3,7 @@ import asyncio
 import time
 from typing import Callable, Any, Dict, List, Optional, Union
 from dataclasses import dataclass
-from litellm import completion
+from litellm import completion, acompletion
 from src.config import get_settings
 from src.utils import (
     log_performance_metric,
@@ -99,7 +99,8 @@ class LLMClient:
             completion_kwargs["presence_penalty"] = request.presence_penalty
         
         # Execute in thread pool to avoid blocking
-        return await asyncio.to_thread(completion, **completion_kwargs)
+        # return await asyncio.to_thread(completion, **completion_kwargs)
+        return await acompletion(**completion_kwargs)
     
     def _validate_request(self, request: CompletionRequest) -> None:
         """Validate completion request for safety and compliance."""

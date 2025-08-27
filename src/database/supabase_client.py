@@ -344,8 +344,7 @@ class SupabaseClient:
                 "user_id": user_id,
                 "content_type": content_type,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "content_length": len(content),
-                **(metadata or {})
+                "metadata": metadata or {}
             }
             
             document = Document(page_content=content, metadata=full_metadata)
@@ -353,7 +352,7 @@ class SupabaseClient:
             
             log_event(
                 event="vector_store_save_success",
-                user_id=user_id, content_type=content_type, content_length=len(content)
+                user_id=user_id, content_type=content_type, metadata=metadata
             )
             return True
             

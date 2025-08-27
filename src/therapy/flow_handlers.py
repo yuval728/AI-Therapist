@@ -260,20 +260,19 @@ class JournalHandler:
             reflection = await journal_tool(entry)
             
             # Save to long-term memory with enhanced metadata
-            save_to_long_term_memory(
+            await save_to_long_term_memory(
                 user_id, 
                 content=entry, 
                 metadata={
                     "type": "journal",
                     "session_id": session_id,
                     "word_count": len(entry.split()),
-                    "processed": True
                 }
             )
             
             # Update conversation memory
-            state = append_to_memory(state, HumanMessage(content=entry), role="user")
-            state = append_to_memory(state, AIMessage(content=reflection), role="assistant")
+            state = await append_to_memory(state, HumanMessage(content=entry), role="user")
+            state = await append_to_memory(state, AIMessage(content=reflection), role="assistant")
             
             # Log journal processing event
             log_therapy_event(

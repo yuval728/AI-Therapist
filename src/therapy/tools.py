@@ -35,9 +35,9 @@ If it's safe or neutral, respond with ONLY False.
     ]
 
     response = await get_completion(
-        model=settings.model_light,
+        model=settings.models.light_model,
         messages=messages,
-        temperature=settings.temperature_classifiers,
+        temperature=settings.models.temperature_classifiers,
         response_format=CrisisAnalyzer,
     )
     response = response["choices"][0]["message"]["content"]
@@ -56,9 +56,9 @@ async def emotion_tool(text: str) -> str:
     ]
 
     response = await get_completion(
-        model=settings.model_light, 
+        model=settings.models.light_model, 
         messages=messages, 
-        temperature=settings.temperature_classifiers, 
+        temperature=settings.models.temperature_classifiers, 
         response_format=EmotionAnalyzer
     )
     response = response["choices"][0]["message"]["content"]
@@ -82,9 +82,9 @@ async def journal_tool(entry: str) -> str:
     ]
     
     response = await get_completion(
-        model=settings.model_chat, 
+        model=settings.models.chat_model, 
         messages=messages, 
-        temperature=settings.temperature_chat
+        temperature=settings.models.temperature_chat
     )
     response = response["choices"][0]["message"]["content"]
     return response
