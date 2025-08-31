@@ -28,7 +28,6 @@ class TherapySession(BaseEntity):
     user_id: str = Field(..., description="User identifier")
     mode: SessionMode = Field(default=SessionMode.CHAT)
     emotion_detected: Optional[EmotionType] = None
-    emotion_confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
     crisis_detected: bool = False
     crisis_level: Optional[CrisisLevel] = None
     message_count: int = Field(default=0, ge=0)
@@ -39,12 +38,6 @@ class TherapySession(BaseEntity):
     processing_status: ProcessingStatus = Field(default=ProcessingStatus.PENDING)
     is_active: bool = True
     ended_at: Optional[datetime] = None
-    
-    @field_validator('emotion_confidence')
-    def validate_emotion_confidence(cls, v, values):
-        if v is not None and 'emotion_detected' not in values:
-            raise ValueError('emotion_confidence requires emotion_detected')
-        return v
 
 
 class ClassificationFormat(BaseModel):
@@ -60,7 +53,6 @@ class SessionMessage(BaseEntity):
     content: str = Field(..., min_length=1, max_length=5000)
     message_type: str = Field(..., pattern=r'^(user|assistant|system|ai_response|journal_entry)$')
     emotion_detected: Optional[EmotionType] = None
-    emotion_confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
     attack_detected: Optional[AttackType] = None
     is_flagged: bool = False
     processing_time_ms: Optional[int] = Field(None, ge=0)

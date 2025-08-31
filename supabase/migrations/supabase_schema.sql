@@ -37,7 +37,6 @@ create table if not exists memory_logs (
   message_type text check (message_type in ('user_input', 'ai_response', 'system_message', 'journal_entry')) default 'user_input',
   timestamp timestamptz default current_timestamp,
   emotion text,
-  is_crisis boolean default false,
   crisis_level text,
   mode text check (mode in ('chat', 'journal')),
   journal_entry text,

@@ -87,8 +87,6 @@ class MemoryManager:
                 content=message.content,
                 message_type=message_type,
                 emotion=emotion,
-                emotion_confidence=state.get("emotion_confidence"),
-                is_crisis=state.get("is_crisis", False),
                 crisis_level=crisis_level,
                 metadata=self._extract_metadata(state)
             )

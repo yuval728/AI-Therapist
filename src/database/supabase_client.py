@@ -238,7 +238,6 @@ class SupabaseClient:
             "user_id": session.user_id,
             "session_id": session.id,
             "emotion": session.emotion_detected.value if session.emotion_detected else None,
-            "emotion_confidence": session.emotion_confidence,
             "crisis_level": (
                 session.crisis_level.value 
                 if session.crisis_level and session.crisis_level.value != "none" 
@@ -295,8 +294,6 @@ class SupabaseClient:
         content: str,
         message_type: MessageType = MessageType.USER,
         emotion: Optional[EmotionType] = None,
-        emotion_confidence: Optional[float] = None,
-        is_crisis: bool = False,
         crisis_level: Optional[CrisisLevel] = None,
         metadata: Optional[Dict] = None
     ) -> QueryResult:
@@ -311,8 +308,6 @@ class SupabaseClient:
                 "content": content,
                 "message_type": message_type.value,
                 "emotion": emotion.value if emotion else None,
-                "emotion_confidence": emotion_confidence,
-                "is_crisis": is_crisis,
                 "crisis_level": crisis_level.value if crisis_level else None,
                 "message_length": len(content),
                 "token_count": len(content.split()),  # Simple approximation

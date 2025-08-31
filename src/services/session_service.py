@@ -434,7 +434,6 @@ class SessionService:
             summary = {
                 "session_id": session.id,
                 "emotion": session.emotion_detected.value if session.emotion_detected else None,
-                "emotion_confidence": session.emotion_confidence,
                 "crisis_level": session.crisis_level.value if session.crisis_level else None,
                 "created_at": session.created_at.isoformat() if session.created_at else None,
                 "updated_at": session.updated_at.isoformat() if session.updated_at else None,
@@ -479,7 +478,6 @@ class SessionService:
                 EmotionType(session_data.get("emotion", "neutral")) 
                 if session_data.get("emotion") else None
             ),
-            emotion_confidence=session_data.get("emotion_confidence"),
             crisis_level=(
                 CrisisLevel(session_data.get("crisis_level", "none")) 
                 if session_data.get("crisis_level") else None
@@ -528,8 +526,6 @@ class SessionService:
             content=msg_data["content"],
             message_type=norm_type,
             emotion_detected=emotion_enum,
-            # Optional extras when present
-            emotion_confidence=msg_data.get("emotion_confidence"),
             attack_detected=msg_data.get("attack_detected"),
             is_flagged=bool(msg_data.get("is_flagged", False)),
             processing_time_ms=msg_data.get("processing_time_ms"),
@@ -538,7 +534,7 @@ class SessionService:
     def _validate_and_normalize_updates(self, updates: Dict[str, Any]) -> Dict[str, Any]:
         """Validate and normalize session update fields."""
         allowed_fields = {
-            "emotion", "emotion_confidence", "crisis_level", "processing_status",
+            "emotion", "crisis_level", "processing_status",
             "session_summary", "metadata", "ended_at"
         }
         
