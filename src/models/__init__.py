@@ -32,7 +32,8 @@ from .state import (
     SessionMessage,
     MemoryEntry,
     CrisisEvent,
-    JournalEntry
+    JournalEntry,
+    ClassificationFormat
 )
 
 __all__ = [
@@ -69,5 +70,6 @@ __all__ = [
     "SessionMessage",
     "MemoryEntry",
     "CrisisEvent",
-    "JournalEntry"
+    "JournalEntry",
+    "ClassificationFormat"
 ]

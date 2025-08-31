@@ -6,10 +6,11 @@ from src.therapy.memory.memory_manager import (
     append_to_memory,
     save_to_long_term_memory,
 )
-from src.config.constants import ResponseMessages, ClassificationResults
-from src.models.enums import AttackType, EmotionType, CrisisLevel, MessageType
-from src.core import moderate_input, moderate_output, detect_pii_enhanced
+from src.config.constants import ResponseMessages, ClassificationResults, SystemPrompts
+from src.models import AttackType, EmotionType, CrisisLevel, MessageType, ClassificationFormat
+from src.core import moderate_input, moderate_output, detect_pii_enhanced, chat_completion, classify_text
 from src.utils import log_therapy_event, timing_decorator
+import json
 
 
 class InputHandler:
@@ -195,11 +196,10 @@ class ClassificationHandler:
     """Enhanced classification tasks with monitoring and error handling."""
     
     @staticmethod
-    @timing_decorator("journal_classification")
-    async def classify_journal_intent(state: Dict[str, Any]) -> Dict[str, Any]:
+    @timing_decorator("classification")
+    async def classify_intent(state: Dict[str, Any]) -> Dict[str, Any]:
         """Classify input as journal or chat with enhanced monitoring."""
-        from src.core import classify_text
-        from src.config.constants import SystemPrompts
+        
         
         user_id = state.get("user_id")
         session_id = state.get("session_id")
@@ -209,32 +209,54 @@ class ClassificationHandler:
             # Use enhanced classification
             result = await classify_text(
                 text=user_input,
-                system_prompt=SystemPrompts.JOURNAL_CLASSIFIER,
-                user_id=user_id
+                system_prompt=SystemPrompts.CLASSIFIER,
+                user_id=user_id,
+                response_format=ClassificationFormat
             )
+            log_therapy_event(
+                event="classification_completed",
+                user_id=user_id,
+                session_id=session_id,
+                classification_result=result
+            )
+            result = json.loads(result)
             
-            classification = result.strip().lower()
+            try:
+                mode = ClassificationResults.CHAT if result['mode'] == 'chat' else ClassificationResults.JOURNAL
+                crisis_level = CrisisLevel(result['crisis_level']) if result['crisis_level'] != 'none' else None
+                emotion = EmotionType(result['emotion']) if result['emotion'] != 'neutral' else None
+            except Exception as e:
+                log_therapy_event(
+                    event=f"classification_failed_values{result}",
+                    user_id=user_id,
+                    session_id=session_id,
+                    error=str(e)
+                )
+                mode = ClassificationResults.CHAT
+                crisis_level = "none"
+                emotion = "neutral"
             
             # Log classification event
             log_therapy_event(
-                event="journal_classification_completed",
+                event="classification_completed",
                 user_id=user_id,
                 session_id=session_id,
-                classification=classification,
+                mode=mode,
+                crisis_level=crisis_level,
+                emotion=emotion,
                 input_length=len(user_input)
             )
             
-            return {**state, "mode": classification}
+            return {**state, "mode": mode, "crisis_level": crisis_level, "emotion": emotion}
             
         except Exception as e:
             log_therapy_event(
-                event="journal_classification_failed",
+                event="classification_failed",
                 user_id=user_id,
                 session_id=session_id,
                 error=str(e)
             )
-            # Default to chat mode if classification fails
-            return {**state, "mode": ClassificationResults.CHAT}
+            return {**state, "mode": ClassificationResults.CHAT, "crisis_level": "none", "emotion": "neutral"}
     
     @staticmethod
     def is_journal_entry(state: Dict[str, Any]) -> bool:

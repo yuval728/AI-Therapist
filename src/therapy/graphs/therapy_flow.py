@@ -1,11 +1,9 @@
 from langgraph.graph import StateGraph, END
-from src.therapy.tools import emotion_tool, crisis_tool
-from src.core import chat_completion
-from src.models import TherapyState
+from src.models import TherapyState, CrisisLevel, EmotionType
 from langchain_core.messages import HumanMessage, AIMessage
 from src.therapy.memory.memory_manager import get_memory_manager
 from src.config import get_settings
-from src.config.constants import NodeNames, ClassificationResults, SystemPrompts, Limits
+from src.config.constants import NodeNames, ClassificationResults, Limits
 from src.therapy.flow_handlers import (
     InputHandler,
     ResponseHandler,
@@ -15,6 +13,7 @@ from src.therapy.flow_handlers import (
 )
 from src.therapy.services.therapy_service import get_therapy_service
 from src.utils import log_therapy_event, timing_decorator
+import asyncio
 
 settings = get_settings()
 
@@ -32,25 +31,28 @@ async def therapy_node(state: TherapyState) -> TherapyState:
         # Use memory manager for conversation history and relevant memories
         memory_manager = await get_memory_manager()
         state = memory_manager.prune_messages(state)
-        history = await memory_manager.get_memory(state, from_db=False)
+
+        # Parallelize fetching recent history and long-term memory search
+        history_task = asyncio.create_task(memory_manager.get_memory(state, from_db=False))
+        ltm_task = asyncio.create_task(memory_manager.search_long_term_memory(user_id, user_input))
+        history, search_result = await asyncio.gather(history_task, ltm_task)
+
         conversation_history = [
             {"role": "user" if m.type == 'human' else 'assistant', "content": m.content}
             for m in history
         ]
-        
-        # Get relevant memories
-        search_result = await memory_manager.search_long_term_memory(user_id, user_input)
-        relevant_memories = [doc.page_content for doc in search_result.documents]
-        
-        # Get session summary if available
+
+        relevant_memories = [doc.page_content for doc in getattr(search_result, "documents", [])]
+
         session_summary = state.get("summary")
-        
-        # Use therapy service for comprehensive processing
+
         therapy_service = get_therapy_service()
         result = await therapy_service.process_therapy_input(
             user_id=user_id,
             session_id=session_id,
             input_text=user_input,
+            emotion=state["emotion"],
+            crisis_level=state["crisis_level"],
             conversation_history=conversation_history,
             relevant_memories=relevant_memories,
             session_summary=session_summary
@@ -64,10 +66,6 @@ async def therapy_node(state: TherapyState) -> TherapyState:
         updated_state = {
             **state,
             "response": result["response"],
-            "emotion": result["emotion"],
-            "emotion_confidence": result["emotion_confidence"],
-            "is_crisis": result["is_crisis"],
-            "crisis_level": result["crisis_level"],
             "relevant_memories": relevant_memories,
         }
         
@@ -90,56 +88,25 @@ async def therapy_node(state: TherapyState) -> TherapyState:
             pass  # Continue with fallback even if memory fails
         return {**state, "response": fallback_response}
 
-@timing_decorator("emotion_analysis")
-async def emotion_node(state: TherapyState) -> TherapyState:
-    """Enhanced emotion detection with monitoring."""
-    user_id = state["user_id"]
-    user_input = state["input"]
-    
+
+async def decide_transition(state: TherapyState) -> str:
+    """Transition node for intent classification."""
     try:
-        therapy_service = get_therapy_service()
-        emotion, confidence = await therapy_service.analyze_emotion(user_input, user_id)
+        if state['crisis_level'] in [CrisisLevel.HIGH, CrisisLevel.CRITICAL]:
+            return ClassificationResults.CRISIS
         
-        return {
-            **state, 
-            "emotion": emotion.value if emotion else None,
-            "emotion_confidence": confidence
-        }
+        if state['mode'] == ClassificationResults.JOURNAL:
+            return ClassificationResults.JOURNAL
         
+        return ClassificationResults.CHAT
     except Exception as e:
         log_therapy_event(
-            event="emotion_node_failed",
-            user_id=user_id,
+            event="check_intent_failed",
+            user_id=state["user_id"],
             error=str(e)
         )
-        return {**state, "emotion": None, "emotion_confidence": 0.0}
-
-@timing_decorator("crisis_detection")
-async def crisis_check_node_async(state: TherapyState) -> str:
-    """Enhanced crisis detection with monitoring."""
-    user_id = state["user_id"]
-    user_input = state["input"]
+        return ClassificationResults.CHAT
     
-    try:
-        therapy_service = get_therapy_service()
-        is_crisis, crisis_level = await therapy_service.detect_crisis(user_input, user_id)
-        
-        # Update state with crisis information
-        state["is_crisis"] = is_crisis
-        state["crisis_level"] = crisis_level.value if crisis_level else None
-        
-        return ClassificationResults.CRISIS if is_crisis else ClassificationResults.SAFE
-        
-    except Exception as e:
-        log_therapy_event(
-            event="crisis_check_failed",
-            user_id=user_id,
-            error=str(e)
-        )
-        # Default to safe if detection fails
-        return ClassificationResults.SAFE
-
-# === Wrapper Functions for Handlers ===
 
 def input_moderation_check(state: TherapyState) -> dict:
     """Check input moderation using handler."""
@@ -165,9 +132,9 @@ def crisis_node(state: TherapyState) -> TherapyState:
     """Handle crisis using handler."""
     return ResponseHandler.handle_crisis(state)
 
-async def journal_intent_node(state: TherapyState) -> TherapyState:
-    """Classify journal intent using handler."""
-    return await ClassificationHandler.classify_journal_intent(state)
+async def classify_intent_node(state: TherapyState) -> TherapyState:
+    """Classify mode, emotion and crisis level using handler."""
+    return await ClassificationHandler.classify_intent(state)
 
 def is_journal_entry(state: TherapyState) -> bool:
     """Check if journal entry using handler."""
@@ -188,7 +155,7 @@ def output_validation_node(state: TherapyState) -> TherapyState:
 # === Graph Construction ===
 
 def build_therapy_graph():
-    """Build simplified therapy graph with cleaner routing."""
+    """Build simplified therapy graph using combined classification."""
     graph = StateGraph(TherapyState)
 
     # Register nodes using constants
@@ -197,10 +164,11 @@ def build_therapy_graph():
     graph.add_node(NodeNames.HANDLE_INJECTION, handle_prompt_injection)
     graph.add_node(NodeNames.CHECK_PII, pii_detection_node)
     graph.add_node(NodeNames.HANDLE_PII, handle_pii)
-    graph.add_node(NodeNames.ANALYZE_EMOTION, emotion_node)
-    graph.add_node(NodeNames.CHECK_CRISIS, crisis_check_node_async)
+    # graph.add_node(NodeNames.ANALYZE_EMOTION, emotion_node)
+    # graph.add_node(NodeNames.CHECK_CRISIS, crisis_check_node_async)
+    # graph.add_node(NodeNames.CHECK_JOURNAL, journal_intent_node)
+    graph.add_node(NodeNames.CLASSIFY_INTENT, classify_intent_node)
     graph.add_node(NodeNames.CRISIS, crisis_node)
-    graph.add_node(NodeNames.CHECK_JOURNAL, journal_intent_node)
     graph.add_node(NodeNames.JOURNAL, journal_node)
     graph.add_node(NodeNames.CHAT, therapy_node)
     graph.add_node(NodeNames.HANDLE_UNSAFE_RESPONSE, output_validation_node)
@@ -234,31 +202,22 @@ def _add_routing_edges(graph):
         lambda state: state.get("attack", ClassificationResults.SAFE),
         {
             "pii_found": NodeNames.HANDLE_PII,
-            ClassificationResults.SAFE: NodeNames.ANALYZE_EMOTION,
+            ClassificationResults.SAFE: NodeNames.CLASSIFY_INTENT,
         },
     )
     graph.add_edge(NodeNames.HANDLE_PII, END)
 
-    # Crisis detection routing
+    # Unified intent classification routing
     graph.add_conditional_edges(
-        NodeNames.ANALYZE_EMOTION,
-        crisis_check_node_async,
+        NodeNames.CLASSIFY_INTENT,
+        decide_transition,
         {
-            ClassificationResults.SAFE: NodeNames.CHECK_JOURNAL,
             ClassificationResults.CRISIS: NodeNames.CRISIS,
+            ClassificationResults.JOURNAL: NodeNames.JOURNAL,
+            ClassificationResults.CHAT: NodeNames.CHAT,
         },
     )
     graph.add_edge(NodeNames.CRISIS, END)
-
-    # Journal vs chat routing
-    graph.add_conditional_edges(
-        NodeNames.CHECK_JOURNAL,
-        is_journal_entry,
-        {
-            True: NodeNames.JOURNAL,
-            False: NodeNames.CHAT,
-        },
-    )
     graph.add_edge(NodeNames.JOURNAL, END)
 
     # Response safety validation

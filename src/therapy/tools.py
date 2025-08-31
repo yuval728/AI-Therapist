@@ -3,22 +3,23 @@ from pydantic import BaseModel
 import json
 from src.config import get_settings
 from src.core.llm_utils import get_completion
+from src.models.enums import EmotionType, CrisisLevel, MessageType
 
 settings = get_settings()
 
 
 class CrisisAnalyzer(BaseModel):
-    crisis: bool
+    crisis: CrisisLevel
 
 
 class EmotionAnalyzer(BaseModel):
-    emotion: str
+    emotion: EmotionType
 
 
-async def crisis_tool(text: str) -> bool:
+async def crisis_tool(text: str) -> CrisisLevel:
     """
     Uses LiteLLM to detect if the message contains a mental health crisis.
-    Returns True if the message indicates suicidal thoughts, self-harm, or emergency.
+    Returns the severity level of the crisis.
     """
     messages = [
         {"role": "system", "content": "You are a mental health safety checker."},
@@ -27,9 +28,7 @@ async def crisis_tool(text: str) -> bool:
             "content": f"""
 Analyze this message for signs of crisis:
 '{text}'
-
-If the message mentions suicide, self-harm, or extreme emotional distress, respond with ONLY True.
-If it's safe or neutral, respond with ONLY False.
+Respond with only: 'none', 'low', 'moderate', 'high', or 'critical' based on the severity of crisis indicators.
 """,
         },
     ]
@@ -42,17 +41,17 @@ If it's safe or neutral, respond with ONLY False.
     )
     response = response["choices"][0]["message"]["content"]
     response = json.loads(response)
-    return response.get("crisis", False)
+    return response["crisis"]
 
 
-async def emotion_tool(text: str) -> str:
+async def emotion_tool(text: str) -> EmotionType:
     """
     Uses LiteLLM to classify the user's emotional state.
     Returns one-word emotion like 'sad', 'anxious', 'angry', etc.
     """
     messages = [
         {"role": "system", "content": "You are an expert emotional classifier."},
-        {"role": "user", "content": f"What emotion is being expressed in this message: '{text}'? Reply with one word only."}
+        {"role": "user", "content": f"What emotion is being expressed in this message: '{text}'? Reply with only the primary emotion: happy, sad, angry, anxious, fearful, surprised, disgusted, neutral, confused, excited, calm, frustrated, hopeful, lonely, or overwhelmed."}
     ]
 
     response = await get_completion(
@@ -63,8 +62,9 @@ async def emotion_tool(text: str) -> str:
     )
     response = response["choices"][0]["message"]["content"]
     response = json.loads(response)
-    
-    return response.get("emotion", "").strip().lower()
+    return response["emotion"]
+
+
 
 
 async def journal_tool(entry: str) -> str:
@@ -88,3 +88,9 @@ async def journal_tool(entry: str) -> str:
     )
     response = response["choices"][0]["message"]["content"]
     return response
+
+
+if __name__ == "__main__":
+    import asyncio
+    print(asyncio.run(emotion_tool("I'm feeling sad.")))
+    print(asyncio.run(crisis_tool("I'm feeling sad.")))

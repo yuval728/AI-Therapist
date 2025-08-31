@@ -6,7 +6,6 @@ from langchain_core.messages import BaseMessage
 from .base import BaseEntity, TimestampMixin
 from .enums import AttackType, SessionMode, EmotionType, CrisisLevel, ProcessingStatus
 
-
 class TherapyState(TypedDict):
     """Core state for therapy graph execution."""
     user_id: str
@@ -15,10 +14,8 @@ class TherapyState(TypedDict):
     messages: List[BaseMessage] = Field(default_factory=list)
     response: Optional[str] = None
     relevant_memories: Optional[List[str]] = None
-    emotion: Optional[str] = None
-    emotion_confidence: Optional[float] = None
-    is_crisis: Optional[bool] = None
-    crisis_level: Optional[str] = None
+    emotion: Optional[EmotionType] = None
+    crisis_level: Optional[CrisisLevel] = None
     mode: Optional[str] = None
     journal_entry: Optional[str] = None
     attack: Optional[str] = None
@@ -50,6 +47,12 @@ class TherapySession(BaseEntity):
         return v
 
 
+class ClassificationFormat(BaseModel):
+    mode: str
+    crisis_level: str
+    emotion: str
+
+
 class SessionMessage(BaseEntity):
     """Individual message within a therapy session."""
     session_id: str = Field(..., description="Parent session ID")
@@ -61,6 +64,7 @@ class SessionMessage(BaseEntity):
     attack_detected: Optional[AttackType] = None
     is_flagged: bool = False
     processing_time_ms: Optional[int] = Field(None, ge=0)
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
     
 
 class MemoryEntry(BaseEntity):

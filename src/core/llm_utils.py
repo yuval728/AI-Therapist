@@ -1,7 +1,7 @@
 """Enhanced LLM utilities with comprehensive error handling and monitoring."""
 import asyncio
 import time
-from typing import Callable, Any, Dict, List, Optional, Union
+from typing import Callable, Any, Dict, List, Optional, Union, Type
 from dataclasses import dataclass
 from litellm import completion, acompletion
 from src.config import get_settings
@@ -28,6 +28,7 @@ class CompletionRequest:
     frequency_penalty: Optional[float] = None
     presence_penalty: Optional[float] = None
     user_id: Optional[str] = None
+    response_format: Optional[Type] = None
     
     def __post_init__(self):
         """Validate completion request parameters."""
@@ -86,6 +87,7 @@ class LLMClient:
             "model": request.model,
             "messages": request.messages,
             "temperature": request.temperature,
+            "response_format": request.response_format,
         }
         
         # Add optional parameters
@@ -222,7 +224,8 @@ async def classify_text(
     text: str,
     system_prompt: str,
     model: Optional[str] = None,
-    user_id: Optional[str] = None
+    user_id: Optional[str] = None,
+    response_format: Optional[Type] = None
 ) -> str:
     """Classify text using LLM with consistent formatting."""
     messages = [
@@ -234,7 +237,8 @@ async def classify_text(
         messages=messages,
         model=model or settings.models.light_model,
         temperature=settings.models.temperature_classifiers,
-        user_id=user_id
+        user_id=user_id,
+        response_format=response_format
     )
 
 

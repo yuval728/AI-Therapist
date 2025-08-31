@@ -284,7 +284,11 @@ class SessionService:
         self, 
         user_id: str, 
         session_id: str,
-        pagination: Optional[PaginationParams] = None
+        pagination: Optional[PaginationParams] = None,
+        *,
+        after_created_at: Optional[str] = None,
+        before_created_at: Optional[str] = None,
+        order: str = "asc"
     ) -> APIResponse[List[SessionMessage]]:
         """Get messages for a therapy session."""
         await self._ensure_initialized()
@@ -292,14 +296,25 @@ class SessionService:
         try:
             pagination = pagination or PaginationParams()
 
-            # Fetch paginated messages in ascending order for natural chat history
-            result = await self.supabase_client.get_memory_logs(
-                user_id=user_id,
-                session_id=session_id,
-                limit=pagination.limit,
-                offset=pagination.offset,
-                order="asc",
-            )
+            # Prefer keyset pagination when cursor provided
+            if after_created_at or before_created_at:
+                result = await self.supabase_client.get_memory_logs_keyset(
+                    user_id=user_id,
+                    session_id=session_id,
+                    limit=pagination.limit,
+                    order=order,
+                    after_created_at=after_created_at,
+                    before_created_at=before_created_at,
+                )
+            else:
+                # Fallback to offset-based for initial loads
+                result = await self.supabase_client.get_memory_logs(
+                    user_id=user_id,
+                    session_id=session_id,
+                    limit=pagination.limit,
+                    offset=pagination.offset,
+                    order="asc",
+                )
 
             if not result.success:
                 return APIResponse(
@@ -310,29 +325,22 @@ class SessionService:
             
             messages = [self._build_message_from_data(data) for data in result.data]
             
-            # Retrieve total count for pagination UI
-            try:
-                count_result = (
-                    self.supabase_client.client.table("memory_logs")
-                    .select("count", count="exact")
-                    .eq("user_id", user_id)
-                    .eq("session_id", session_id)
-                    .execute()
-                )
-                total_count = getattr(count_result, "count", 0) or 0
-            except Exception:
-                total_count = pagination.offset + len(messages)
-
-            has_more = (pagination.offset + len(messages)) < total_count
+            # Build cursor metadata for client; avoid expensive count
+            next_after = messages[-1].timestamp.isoformat() if messages else None
+            prev_before = messages[0].timestamp.isoformat() if messages else None
+            has_more = bool(messages)  # client can probe using next cursor
 
             return APIResponse(
                 success=True,
                 data=messages,
                 metadata={
-                    "total": total_count,
+                    "total": len(messages),
                     "offset": pagination.offset,
                     "limit": pagination.limit,
                     "has_more": has_more,
+                    "order": order,
+                    "next_after": next_after,
+                    "prev_before": prev_before,
                     "session_id": session_id,
                 }
             )

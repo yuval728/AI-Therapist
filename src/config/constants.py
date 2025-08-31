@@ -31,6 +31,13 @@ class SystemPrompts:
         "You classify if a user message is a journal entry or a request for therapy chat. "
         "Reply ONLY with 'journal' or 'chat'."
     )
+    CLASSIFIER = (
+        "You analyze the user's message and determine the following: "
+        "1. Whether it is a journal entry or a request for therapy chat. "
+        "2. Crisis level: 'none', 'low', 'moderate', 'high', or 'critical' based on the severity of crisis indicators "
+        "3. Which emotion out of happy, sad, angry, anxious, fearful, surprised, disgusted, neutral, confused, excited, calm, frustrated, hopeful, lonely, or overwhelmed is being expressed in this message?"
+        "Reply with a JSON object containing these determinations. The JSON should have the following format: {\"mode\": \"journal\" or \"chat\", \"crisis_level\": \"none\" or \"low\" or \"moderate\" or \"high\" or \"critical\", \"emotion\": \"happy\" or \"sad\" or \"angry\" or \"anxious\" or \"fearful\" or \"surprised\" or \"disgusted\" or \"neutral\" or \"confused\" or \"excited\" or \"calm\" or \"frustrated\" or \"hopeful\" or \"lonely\" or \"overwhelmed\"}."
+    )
 
 class Limits:
     """Application limits and thresholds"""
@@ -58,7 +65,9 @@ class NodeNames:
     CHECK_JOURNAL = "check_journal"
     JOURNAL = "journal"
     CHAT = "chat"
+    CLASSIFY_INTENT = "classify_intent"
     HANDLE_UNSAFE_RESPONSE = "handle_unsafe_response"
+
 
 class ClassificationResults:
     """Classification result constants"""

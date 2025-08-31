@@ -156,6 +156,54 @@ class SupabaseClient:
         except Exception as e:
             return QueryResult(data=[], error=str(e), success=False)
     
+    @timing_decorator("get_memory_logs_keyset")
+    async def get_memory_logs_keyset(
+        self,
+        user_id: str,
+        session_id: str,
+        limit: int = 50,
+        order: str = "asc",
+        after_created_at: Optional[str] = None,
+        before_created_at: Optional[str] = None,
+    ) -> QueryResult:
+        """Get memory logs using keyset pagination over created_at.
+
+        Args:
+            user_id: The user id.
+            session_id: Session filter.
+            limit: Number of items to fetch.
+            order: 'asc' or 'desc'.
+            after_created_at: For forward pagination (created_at strictly greater than this).
+            before_created_at: For backward pagination (created_at strictly less than this).
+        """
+        self._ensure_initialized()
+        try:
+            q = (
+                self.client.table("memory_logs")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("session_id", session_id)
+            )
+
+            desc_flag = False if str(order).lower() == "asc" else True
+
+            # Apply cursor filters
+            if after_created_at and not before_created_at:
+                q = q.gt("created_at", after_created_at)
+            if before_created_at and not after_created_at:
+                q = q.lt("created_at", before_created_at)
+
+            # Stable ordering by created_at with tie-breaker id if available
+            q = q.order("created_at", desc=desc_flag).order("id", desc=desc_flag)
+
+            # Use limit (no offset)
+            q = q.limit(limit)
+
+            result = q.execute()
+            return self._process_query_result(result)
+        except Exception as e:
+            return QueryResult(data=[], error=str(e), success=False)
+    
 
     def _process_query_result(self, result, success_event: Optional[str] = None, **event_data) -> QueryResult:
         """Process Supabase query result consistently."""
