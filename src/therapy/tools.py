@@ -88,9 +88,3 @@ async def journal_tool(entry: str) -> str:
     )
     response = response["choices"][0]["message"]["content"]
     return response
-
-
-if __name__ == "__main__":
-    import asyncio
-    print(asyncio.run(emotion_tool("I'm feeling sad.")))
-    print(asyncio.run(crisis_tool("I'm feeling sad.")))

@@ -1,9 +1,10 @@
 from langgraph.graph import StateGraph, END
-from src.models import TherapyState, CrisisLevel, EmotionType
+from langgraph.checkpoint.memory import MemorySaver
+from src.models import TherapyState, CrisisLevel
 from langchain_core.messages import HumanMessage, AIMessage
 from src.therapy.memory.memory_manager import get_memory_manager
 from src.config import get_settings
-from src.config.constants import NodeNames, ClassificationResults, Limits
+from src.config.constants import NodeNames, ClassificationResults
 from src.therapy.flow_handlers import (
     InputHandler,
     ResponseHandler,
@@ -230,6 +231,8 @@ def _add_routing_edges(graph):
         },
     )
     graph.add_edge(NodeNames.HANDLE_UNSAFE_RESPONSE, END)
+
+    return graph.compile(checkpointer=MemorySaver())
 
 # === Example usage ===
 

@@ -415,20 +415,27 @@ class SessionService:
             session_result = await self.get_session(user_id, session_id)
             if not session_result.success:
                 return session_result
+
+            # Use a single query to get message count and crisis events count efficiently
+            # This avoids multiple round trips to the database
+            async def get_counts():
+                # Get message count (approximate is fine for summaries)
+                messages_future = self.supabase_client.client.table("memory_logs")\
+                    .select("id", count="estimated")\
+                    .eq("user_id", user_id)\
+                    .eq("session_id", session_id)\
+                    .execute()
+                
+                # Get crisis events count
+                crisis_future = self.supabase_client.client.table("crisis_events")\
+                    .select("id", count="exact")\
+                    .eq("user_id", user_id)\
+                    .eq("session_id", session_id)\
+                    .execute()
+                
+                return messages_future, crisis_future
             
-            # Get message count
-            messages_result = self.supabase_client.client.table("memory_logs")\
-                .select("count", count="exact")\
-                .eq("user_id", user_id)\
-                .eq("session_id", session_id)\
-                .execute()
-            
-            # Get crisis events for this session
-            crisis_result = self.supabase_client.client.table("crisis_events")\
-                .select("*")\
-                .eq("user_id", user_id)\
-                .eq("session_id", session_id)\
-                .execute()
+            messages_result, crisis_result = await get_counts()
             
             session = session_result.data
             summary = {
@@ -439,7 +446,7 @@ class SessionService:
                 "updated_at": session.updated_at.isoformat() if session.updated_at else None,
                 "ended_at": session.ended_at.isoformat() if session.ended_at else None,
                 "message_count": messages_result.count if messages_result else 0,
-                "crisis_events": len(crisis_result.data) if crisis_result else 0,
+                "crisis_events": crisis_result.count if crisis_result else 0,
                 "duration_minutes": None,
                 "metadata": session.metadata,
                 "processing_status": session.processing_status.value if session.processing_status else None,

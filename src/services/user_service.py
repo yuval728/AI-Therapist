@@ -304,8 +304,15 @@ class UserService:
                         .eq("user_id", user_id)\
                         .execute()
 
-            ## TODO: Delete user from Supabase
-            # self.supabase_client.client.auth.admin.delete_user(user_id)
+            if self.supabase_client.service_role_key:
+                try:
+                    self.supabase_client.client.auth.admin.delete_user(user_id)
+                except Exception as auth_error:
+                    log_therapy_event(
+                        event="user_auth_delete_failed",
+                        user_id=user_id,
+                        error=str(auth_error)
+                    )
             
             log_therapy_event(
                 event="user_account_deleted",

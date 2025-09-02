@@ -100,10 +100,10 @@ class Settings(BaseSettings):
     reload: bool = Field(default=True, env="RELOAD")
     
     # CORS settings
-    # cors_origins: List[str] = Field(
-    #     default=["http://localhost:5173", "http://127.0.0.1:5173"],
-    #     env="CORS_ORIGINS"
-    # )
+    cors_origins: List[str] = Field(
+        default=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"],
+        env="CORS_ORIGINS"
+    )
     cors_allow_credentials: bool = Field(default=True, env="CORS_ALLOW_CREDENTIALS")
     
     # Nested settings

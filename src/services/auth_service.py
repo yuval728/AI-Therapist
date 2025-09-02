@@ -39,7 +39,6 @@ class AuthService:
             
             # Attempt signup
             auth_result = await self.supabase_auth.sign_up(request)
-            print(auth_result)
             if not auth_result.success:
                 error_msg = auth_result.error or "Registration failed"
                 log_therapy_event(

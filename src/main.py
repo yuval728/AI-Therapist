@@ -5,12 +5,11 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
-import time
 from datetime import datetime, timezone
 
 from src.api import (
     auth_router, users_router, sessions_router, health_router, chat_router,
-    SecurityMiddleware, CORSMiddleware as CustomCORSMiddleware, ErrorHandlingMiddleware
+    SecurityMiddleware
 )
 from src.database import get_supabase_client
 from src.config import get_settings
@@ -60,13 +59,12 @@ def create_app() -> FastAPI:
     )
     
     # Add middleware in correct order (last added = first executed)
-    app.add_middleware(ErrorHandlingMiddleware)
     app.add_middleware(SecurityMiddleware, exclude_paths=["/docs", "/redoc", "/openapi.json", "/health"])
     
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=settings.cors_origins,
         allow_credentials=settings.cors_allow_credentials,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["*"],

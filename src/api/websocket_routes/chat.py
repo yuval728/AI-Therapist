@@ -16,54 +16,6 @@ from src.models import (
 from src.utils import log_therapy_event, timing_decorator
 from src.config import get_settings
 
-# WebSocket connection manager
-class ConnectionManager:
-    """Manage WebSocket connections."""
-    
-    def __init__(self):
-        self.active_connections: Dict[str, WebSocket] = {}
-        self.user_sessions: Dict[str, str] = {}  # user_id -> session_id
-    
-    async def connect(self, websocket: WebSocket, user_id: str, session_id: str):
-        """Register WebSocket connection (assumes already accepted)."""
-        self.active_connections[user_id] = websocket
-        self.user_sessions[user_id] = session_id
-        
-        log_therapy_event(
-            event="websocket_connected",
-            user_id=user_id,
-            session_id=session_id
-        )
-    
-    def disconnect(self, user_id: str):
-        """Remove WebSocket connection."""
-        if user_id in self.active_connections:
-            del self.active_connections[user_id]
-        if user_id in self.user_sessions:
-            del self.user_sessions[user_id]
-        
-        log_therapy_event(
-            event="websocket_disconnected",
-            user_id=user_id
-        )
-    
-    async def send_message(self, user_id: str, message: Dict[str, Any]):
-        """Send message to specific user."""
-        if user_id in self.active_connections:
-            websocket = self.active_connections[user_id]
-            await websocket.send_json(message)
-    
-    async def send_error(self, user_id: str, error: str, error_code: str = "ERROR"):
-        """Send error message to user."""
-        await self.send_message(user_id, {
-            "type": "error",
-            "error": error,
-            "error_code": error_code,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        })
-
-
-manager = ConnectionManager()
 router = APIRouter(prefix="/ws", tags=["websocket"])
 
 @router.websocket("/chat")
@@ -118,11 +70,15 @@ async def chat_websocket(websocket: WebSocket):
             # The model uses `id` as the identifier; DB stores it in `session_id`
             session_id = session_result.data.id
         
-        # Connect to manager
-        await manager.connect(websocket, user_id, session_id)
+        # Connect and log
+        log_therapy_event(
+            event="websocket_connected",
+            user_id=user_id,
+            session_id=session_id
+        )
         
         # Send connection confirmation
-        await manager.send_message(user_id, {
+        await websocket.send_json({
             "type": "connected",
             "session_id": session_id,
             "user_id": user_id,
@@ -131,11 +87,14 @@ async def chat_websocket(websocket: WebSocket):
         
         # Handle messages
         async for message in websocket.iter_json():
-            await handle_chat_message(user_id, session_id, message)
+            await handle_chat_message(websocket, user_id, session_id, message)
             
     except WebSocketDisconnect:
         if user_id:
-            manager.disconnect(user_id)
+            log_therapy_event(
+                event="websocket_disconnected",
+                user_id=user_id
+            )
     except Exception as e:
         log_therapy_event(
             event="websocket_error",
@@ -144,24 +103,35 @@ async def chat_websocket(websocket: WebSocket):
             error=str(e)
         )
         if user_id:
-            await manager.send_error(user_id, "Connection error occurred")
-            manager.disconnect(user_id)
+            await send_error(websocket, "Connection error occurred")
         try:
             await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
         except Exception:
             pass  # WebSocket already closed or connection lost
 
-async def handle_chat_message(user_id: str, session_id: str, message: Dict[str, Any]):
+async def send_error(websocket: WebSocket, error: str, error_code: str = "ERROR"):
+    """Send error message via WebSocket."""
+    try:
+        await websocket.send_json({
+            "type": "error",
+            "error": error,
+            "error_code": error_code,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+    except Exception:
+        pass  # WebSocket might be closed
+
+async def handle_chat_message(websocket: WebSocket, user_id: str, session_id: str, message: Dict[str, Any]):
     """Handle incoming chat message from WebSocket."""
     try:
         message_type = message.get("type")
         
         if message_type == "chat":
-            await handle_therapy_message(user_id, session_id, message)
+            await handle_therapy_message(websocket, user_id, session_id, message)
         elif message_type == "ping":
-            await manager.send_message(user_id, {"type": "pong", "timestamp": datetime.now(timezone.utc).isoformat()})
+            await websocket.send_json({"type": "pong", "timestamp": datetime.now(timezone.utc).isoformat()})
         else:
-            await manager.send_error(user_id, f"Unknown message type: {message_type}", "INVALID_MESSAGE_TYPE")
+            await send_error(websocket, f"Unknown message type: {message_type}", "INVALID_MESSAGE_TYPE")
             
     except Exception as e:
         log_therapy_event(
@@ -170,22 +140,22 @@ async def handle_chat_message(user_id: str, session_id: str, message: Dict[str, 
             session_id=session_id,
             error=str(e)
         )
-        await manager.send_error(user_id, "Failed to process message")
+        await send_error(websocket, "Failed to process message")
 
 
 @timing_decorator("therapy_websocket_response")
-async def handle_therapy_message(user_id: str, session_id: str, message: Dict[str, Any]):
+async def handle_therapy_message(websocket: WebSocket, user_id: str, session_id: str, message: Dict[str, Any]):
     """Process therapy message through the therapy flow."""
     try:
         user_input = message.get("content", "").strip()
         
         if not user_input:
-            await manager.send_error(user_id, "Message content cannot be empty", "EMPTY_MESSAGE")
+            await send_error(websocket, "Message content cannot be empty", "EMPTY_MESSAGE")
             return
         
         
         # Send typing indicator
-        await manager.send_message(user_id, {
+        await websocket.send_json({
             "type": "typing",
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
@@ -211,7 +181,7 @@ async def handle_therapy_message(user_id: str, session_id: str, message: Dict[st
         
         # Send response in chunks for streaming effect
         response_text = result.get("response", "")
-        await stream_response(user_id, session_id, response_text, result)
+        await stream_response(websocket, user_id, session_id, response_text, result)
         
         # Log successful interaction
         log_therapy_event(
@@ -230,10 +200,10 @@ async def handle_therapy_message(user_id: str, session_id: str, message: Dict[st
             session_id=session_id,
             error=str(e)
         )
-        await manager.send_error(user_id, "Failed to process therapy message")
+        await send_error(websocket, "Failed to process therapy message")
 
 
-async def stream_response(user_id: str, session_id: str, response_text: str, result: Dict[str, Any]):
+async def stream_response(websocket: WebSocket, user_id: str, session_id: str, response_text: str, result: Dict[str, Any]):
     """Stream response text in chunks to simulate typing."""
     try:
         # Split response into words for streaming
@@ -243,7 +213,7 @@ async def stream_response(user_id: str, session_id: str, response_text: str, res
         for i in range(0, len(words), chunk_size):
             chunk = " ".join(words[i:i + chunk_size])
             
-            await manager.send_message(user_id, {
+            await websocket.send_json({
                 "type": "response_chunk",
                 "content": chunk,
                 "is_final": False,
@@ -254,7 +224,7 @@ async def stream_response(user_id: str, session_id: str, response_text: str, res
             await asyncio.sleep(0.1)
         
         # Send final message with metadata
-        await manager.send_message(user_id, {
+        await websocket.send_json({
             "type": "response_complete",
             "content": response_text,
             "is_final": True,
@@ -272,7 +242,7 @@ async def stream_response(user_id: str, session_id: str, response_text: str, res
             session_id=session_id,
             error=str(e)
         )
-        await manager.send_error(user_id, "Failed to send response")
+        await send_error(websocket, "Failed to send response")
 
 
 # Health check for WebSocket
@@ -282,7 +252,6 @@ async def websocket_health(websocket: WebSocket):
     await websocket.accept()
     await websocket.send_json({
         "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "active_connections": len(manager.active_connections)
+        "timestamp": datetime.now(timezone.utc).isoformat()
     })
     await websocket.close()
