@@ -3,7 +3,6 @@ import { useEffect, useRef, useCallback, useState } from "react"
 import type React from "react"
 
 import { MessageBubble } from "./message-bubble"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Loader2, ArrowDown } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
@@ -33,7 +32,6 @@ export function MessageList({
   loading = false,
 }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const scrollAreaRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true)
   const [isNearBottom, setIsNearBottom] = useState(true)
@@ -42,16 +40,55 @@ export function MessageList({
   const isLoadingMoreRef = useRef(false)
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
-    messagesEndRef.current?.scrollIntoView({ behavior })
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ 
+        behavior,
+        block: "end",
+        inline: "nearest"
+      })
+    }
   }, [])
+
+  // Keyboard navigation support
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!containerRef.current) return
+      
+      switch (event.key) {
+        case 'Home':
+          if (event.ctrlKey || event.metaKey) {
+            event.preventDefault()
+            containerRef.current.scrollTo({ top: 0, behavior: 'smooth' })
+          }
+          break
+        case 'End':
+          if (event.ctrlKey || event.metaKey) {
+            event.preventDefault()
+            scrollToBottom()
+          }
+          break
+        case 'PageUp':
+          event.preventDefault()
+          containerRef.current.scrollBy({ top: -containerRef.current.clientHeight * 0.8, behavior: 'smooth' })
+          break
+        case 'PageDown':
+          event.preventDefault()
+          containerRef.current.scrollBy({ top: containerRef.current.clientHeight * 0.8, behavior: 'smooth' })
+          break
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [scrollToBottom])
 
   // Check if user is near bottom of scroll area
   const handleScroll = useCallback(
     (event: React.UIEvent<HTMLDivElement>) => {
       const { scrollTop, scrollHeight, clientHeight } = event.currentTarget
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-      const nearBottom = distanceFromBottom < 100
-      const nearTop = scrollTop < 200
+      const nearBottom = distanceFromBottom < 50
+      const nearTop = scrollTop < 100
 
       setIsNearBottom(nearBottom)
       setShouldAutoScroll(nearBottom)
@@ -60,18 +97,21 @@ export function MessageList({
       if (nearTop && hasMore && !isLoadingMoreRef.current && onLoadMore) {
         isLoadingMoreRef.current = true
         const previousScrollHeight = scrollHeight
+        const previousScrollTop = scrollTop
         
         onLoadMore()
         
         // Maintain scroll position after loading more messages
-        setTimeout(() => {
-          if (containerRef.current) {
-            const newScrollHeight = containerRef.current.scrollHeight
-            const heightDifference = newScrollHeight - previousScrollHeight
-            containerRef.current.scrollTop = scrollTop + heightDifference
-          }
-          isLoadingMoreRef.current = false
-        }, 100)
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            if (event.currentTarget) {
+              const newScrollHeight = event.currentTarget.scrollHeight
+              const heightDifference = newScrollHeight - previousScrollHeight
+              event.currentTarget.scrollTop = previousScrollTop + heightDifference
+            }
+            isLoadingMoreRef.current = false
+          }, 150)
+        })
       }
 
       lastScrollTop.current = scrollTop
@@ -86,14 +126,16 @@ export function MessageList({
 
     if (messageCountIncreased && shouldAutoScroll) {
       // Small delay to ensure DOM is updated
-      setTimeout(() => scrollToBottom(), 50)
+      const timeoutId = setTimeout(() => scrollToBottom(), 100)
+      return () => clearTimeout(timeoutId)
     }
   }, [messages.length, shouldAutoScroll, scrollToBottom])
 
   // Auto-scroll when typing indicator appears/disappears
   useEffect(() => {
     if (isTyping && shouldAutoScroll) {
-      setTimeout(() => scrollToBottom(), 50)
+      const timeoutId = setTimeout(() => scrollToBottom(), 100)
+      return () => clearTimeout(timeoutId)
     }
   }, [isTyping, shouldAutoScroll, scrollToBottom])
 
@@ -177,14 +219,24 @@ export function MessageList({
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden relative">
-      <ScrollArea 
-        ref={scrollAreaRef} 
-        className="flex-1 px-4 py-6" 
-        onScrollCapture={handleScroll}
+    <div className="flex-1 flex flex-col relative h-full overflow-hidden">
+      <div 
+        ref={containerRef}
+        className="flex-1 overflow-y-auto px-4 py-6 scroll-smooth custom-scrollbar scroll-container"
+        onScroll={handleScroll}
+        style={{
+          scrollBehavior: 'smooth',
+          overflowX: 'hidden',
+          scrollbarWidth: 'thin',
+          scrollbarColor: 'rgba(156, 163, 175, 0.7) rgba(243, 244, 246, 0.2)',
+          height: '100%',
+          minHeight: '400px',
+        }}
+        role="log"
+        aria-label="Chat messages"
+        tabIndex={0}
       >
-        <div className="max-w-4xl mx-auto" ref={containerRef}>
-          {/* Load more button at top */}
+        <div className="max-w-4xl mx-auto min-h-full pb-20">{/* Load more button at top */}
           <AnimatePresence>
             {hasMore && (
               <motion.div
@@ -261,7 +313,7 @@ export function MessageList({
 
           <div ref={messagesEndRef} />
         </div>
-      </ScrollArea>
+      </div>
 
       {/* Scroll to bottom button */}
       <AnimatePresence>
@@ -270,13 +322,18 @@ export function MessageList({
             initial={{ opacity: 0, y: 20, scale: 0.8 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.8 }}
-            className="absolute bottom-4 right-4 z-10"
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="absolute bottom-6 right-6 z-10"
           >
             <Button
               size="sm"
               variant="secondary"
-              onClick={() => scrollToBottom()}
-              className="rounded-full shadow-lg bg-background/90 backdrop-blur-sm border hover:shadow-xl transition-all duration-200"
+              onClick={() => {
+                setShouldAutoScroll(true)
+                scrollToBottom()
+              }}
+              className="rounded-full shadow-lg bg-primary/90 hover:bg-primary text-primary-foreground backdrop-blur-sm border-0 hover:shadow-xl transition-all duration-200 h-10 w-10 p-0 scroll-to-bottom-btn"
+              aria-label="Scroll to bottom"
             >
               <ArrowDown className="w-4 h-4" />
             </Button>

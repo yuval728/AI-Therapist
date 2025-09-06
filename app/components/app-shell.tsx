@@ -141,7 +141,7 @@ export function AppShell() {
   }, []) // Empty dependency array for cleanup only
 
   return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-background via-background to-secondary/20">
+    <div className="h-screen flex flex-col bg-gradient-to-br from-background via-background to-secondary/20 overflow-hidden">
       {/* Demo Banner */}
       {apiClient.isDemoMode() && (
         <div className="px-4 pt-4">

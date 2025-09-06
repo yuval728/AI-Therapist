@@ -183,7 +183,7 @@ export function ChatWindow() {
     <div className="h-screen flex flex-col bg-gradient-to-br from-background via-background to-secondary/20">
       <ChatNavbar onLogout={handleLogout} />
 
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col">
         {apiClient.isDemoMode() && (
           <div className="px-4 pt-4">
             <DemoBanner />

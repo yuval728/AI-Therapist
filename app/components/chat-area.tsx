@@ -91,7 +91,7 @@ export function ChatArea({
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="flex-1 flex flex-col h-full overflow-hidden">
       {/* Error Alert */}
       {error && (
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mx-4 mt-4">
@@ -109,16 +109,14 @@ export function ChatArea({
       )}
 
       {/* Messages with Load Older */}
-      <div className="flex-1 overflow-hidden">
-        <MessageList 
-          messages={allMessages} 
-          isTyping={isTyping && !streamingState.isStreaming}
-          onLoadMore={onLoadOlder}
-          hasMore={hasMoreHistory}
-          isLoadingMore={historyLoading}
-          loading={messagesLoading}
-        />
-      </div>
+      <MessageList 
+        messages={allMessages} 
+        isTyping={isTyping && !streamingState.isStreaming}
+        onLoadMore={onLoadOlder}
+        hasMore={hasMoreHistory}
+        isLoadingMore={historyLoading}
+        loading={messagesLoading}
+      />
 
       {/* Session Metadata */}
       {streamingState.metadata && (
