@@ -1,7 +1,12 @@
 "use client"
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useCallback, useState } from "react"
+import type React from "react"
+
 import { MessageBubble } from "./message-bubble"
-import { motion } from "framer-motion"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Button } from "@/components/ui/button"
+import { Loader2, ArrowDown } from "lucide-react"
+import { motion, AnimatePresence } from "framer-motion"
 
 interface ChatMessage {
   sender: "user" | "therapist"
@@ -13,20 +18,109 @@ interface ChatMessage {
 interface MessageListProps {
   messages: ChatMessage[]
   isTyping?: boolean
+  onLoadMore?: () => void
+  hasMore?: boolean
+  isLoadingMore?: boolean
+  loading?: boolean
 }
 
-export function MessageList({ messages, isTyping = false }: MessageListProps) {
+export function MessageList({
+  messages,
+  isTyping = false,
+  onLoadMore,
+  hasMore = false,
+  isLoadingMore = false,
+  loading = false,
+}: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const scrollAreaRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true)
+  const [isNearBottom, setIsNearBottom] = useState(true)
+  const previousMessageCount = useRef(messages.length)
+  const lastScrollTop = useRef(0)
+  const isLoadingMoreRef = useRef(false)
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    messagesEndRef.current?.scrollIntoView({ behavior })
+  }, [])
+
+  // Check if user is near bottom of scroll area
+  const handleScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      const { scrollTop, scrollHeight, clientHeight } = event.currentTarget
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+      const nearBottom = distanceFromBottom < 100
+      const nearTop = scrollTop < 200
+
+      setIsNearBottom(nearBottom)
+      setShouldAutoScroll(nearBottom)
+
+      // Load more messages when scrolling near the top
+      if (nearTop && hasMore && !isLoadingMoreRef.current && onLoadMore) {
+        isLoadingMoreRef.current = true
+        const previousScrollHeight = scrollHeight
+        
+        onLoadMore()
+        
+        // Maintain scroll position after loading more messages
+        setTimeout(() => {
+          if (containerRef.current) {
+            const newScrollHeight = containerRef.current.scrollHeight
+            const heightDifference = newScrollHeight - previousScrollHeight
+            containerRef.current.scrollTop = scrollTop + heightDifference
+          }
+          isLoadingMoreRef.current = false
+        }, 100)
+      }
+
+      lastScrollTop.current = scrollTop
+    },
+    [hasMore, onLoadMore],
+  )
+
+  // Auto-scroll for new messages only if user is near bottom
+  useEffect(() => {
+    const messageCountIncreased = messages.length > previousMessageCount.current
+    previousMessageCount.current = messages.length
+
+    if (messageCountIncreased && shouldAutoScroll) {
+      // Small delay to ensure DOM is updated
+      setTimeout(() => scrollToBottom(), 50)
+    }
+  }, [messages.length, shouldAutoScroll, scrollToBottom])
+
+  // Auto-scroll when typing indicator appears/disappears
+  useEffect(() => {
+    if (isTyping && shouldAutoScroll) {
+      setTimeout(() => scrollToBottom(), 50)
+    }
+  }, [isTyping, shouldAutoScroll, scrollToBottom])
+
+  // Scroll to bottom on initial load
+  useEffect(() => {
+    if (messages.length > 0 && !loading) {
+      scrollToBottom("auto")
+    }
+  }, [loading, scrollToBottom]) // Run when loading completes
+
+  // Handle loading state
+  if (loading && messages.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-8">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="text-center"
+        >
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-primary" />
+          <p className="text-muted-foreground">Loading messages...</p>
+        </motion.div>
+      </div>
+    )
   }
 
-  useEffect(() => {
-    scrollToBottom()
-  }, [messages, isTyping])
-
-  if (messages.length === 0 && !isTyping) {
+  if (messages.length === 0 && !isTyping && !loading) {
     return (
       <div className="flex-1 flex items-center justify-center p-8">
         <motion.div
@@ -83,31 +177,112 @@ export function MessageList({ messages, isTyping = false }: MessageListProps) {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-6 scroll-smooth">
-      <div className="max-w-4xl mx-auto">
-        {messages.map((message, index) => (
-          <MessageBubble
-            key={`${message.timestamp}-${index}`}
-            message={message.message}
-            sender={message.sender}
-            timestamp={message.timestamp}
-            index={index}
-            isStreaming={message.isStreaming}
-          />
-        ))}
+    <div className="flex-1 flex flex-col overflow-hidden relative">
+      <ScrollArea 
+        ref={scrollAreaRef} 
+        className="flex-1 px-4 py-6" 
+        onScrollCapture={handleScroll}
+      >
+        <div className="max-w-4xl mx-auto" ref={containerRef}>
+          {/* Load more button at top */}
+          <AnimatePresence>
+            {hasMore && (
+              <motion.div
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="flex justify-center mb-4"
+              >
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isLoadingMore}
+                  onClick={onLoadMore}
+                  className="bg-background/80 backdrop-blur-sm shadow-sm hover:shadow-md transition-shadow"
+                >
+                  {isLoadingMore ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Loading older messages...
+                    </>
+                  ) : (
+                    <>
+                      <ArrowDown className="w-4 h-4 mr-2 rotate-180" />
+                      Load older messages
+                    </>
+                  )}
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-        {isTyping && (
-          <MessageBubble
-            message=""
-            sender="therapist"
-            timestamp={new Date().toISOString()}
-            isTyping={true}
-            index={messages.length}
-          />
+          {/* Messages */}
+          <div className="space-y-4">
+            {messages.map((message, index) => (
+              <motion.div
+                key={`${message.timestamp}-${index}`}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ 
+                  duration: 0.3, 
+                  delay: index < 10 ? index * 0.05 : 0 // Only animate first 10 messages
+                }}
+              >
+                <MessageBubble
+                  message={message.message}
+                  sender={message.sender}
+                  timestamp={message.timestamp}
+                  index={index}
+                  isStreaming={message.isStreaming}
+                />
+              </motion.div>
+            ))}
+          </div>
+
+          {/* Typing indicator */}
+          <AnimatePresence>
+            {isTyping && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.3 }}
+              >
+                <MessageBubble
+                  message=""
+                  sender="therapist"
+                  timestamp={new Date().toISOString()}
+                  isTyping={true}
+                  index={messages.length}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <div ref={messagesEndRef} />
+        </div>
+      </ScrollArea>
+
+      {/* Scroll to bottom button */}
+      <AnimatePresence>
+        {!isNearBottom && messages.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.8 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.8 }}
+            className="absolute bottom-4 right-4 z-10"
+          >
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => scrollToBottom()}
+              className="rounded-full shadow-lg bg-background/90 backdrop-blur-sm border hover:shadow-xl transition-all duration-200"
+            >
+              <ArrowDown className="w-4 h-4" />
+            </Button>
+          </motion.div>
         )}
-
-        <div ref={messagesEndRef} />
-      </div>
+      </AnimatePresence>
     </div>
   )
 }

@@ -3,6 +3,8 @@ import type { Metadata } from "next"
 import { Geist } from "next/font/google"
 import { Manrope } from "next/font/google"
 import "./globals.css"
+import { AppErrorBoundary } from "@/components/error-boundary"
+import { Toaster } from "@/components/ui/toaster"
 
 const geist = Geist({
   subsets: ["latin"],
@@ -29,8 +31,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${geist.variable} ${manrope.variable} antialiased`} suppressHydrationWarning>
-      <body className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/20" suppressHydrationWarning>
-        {children}
+      <body
+        className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/20"
+        suppressHydrationWarning
+      >
+        <AppErrorBoundary>
+          {children}
+          <Toaster />
+        </AppErrorBoundary>
       </body>
     </html>
   )

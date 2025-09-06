@@ -10,7 +10,8 @@ import { useAuth } from "@/hooks/use-auth"
 import { Loader2, Mail, Lock, User, Eye, EyeOff } from "lucide-react"
 import { motion } from "framer-motion"
 import { apiClient } from "@/lib/api"
-import { isValidEmail } from "@/lib/utils"
+import { signInSchema, signUpSchema, validateData } from "@/lib/validation-schemas"
+import { handleValidationError } from "@/lib/error-handler"
 
 interface AuthFormProps {
   mode: "login" | "signup"
@@ -29,31 +30,53 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [formSuccess, setFormSuccess] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
   const { login, signup } = useAuth()
 
-  const validateForm = (): string | null => {
-    if (!email.trim()) return "Email is required"
-    if (!isValidEmail(email)) return "Please enter a valid email address"
-    if (!password) return "Password is required"
-    if (password.length < 8) return "Password must be at least 8 characters"
-    
-    if (mode === "signup") {
-      if (password !== confirmPassword) return "Passwords do not match"
-      if (!termsAccepted) return "You must accept the Terms of Service"
+  const validateForm = (): { isValid: boolean; errors: string[] } => {
+    setFieldErrors({})
+
+    if (mode === "login") {
+      const result = validateData(signInSchema, { email, password })
+      if (!result.success) {
+        const errors = result.errors || []
+        handleValidationError(new Error(errors.join(", ")), {
+          component: "AuthForm",
+          action: "login_validation",
+        })
+        return { isValid: false, errors }
+      }
+      return { isValid: true, errors: [] }
+    } else {
+      const result = validateData(signUpSchema, {
+        email,
+        password,
+        confirmPassword,
+        fullName: fullName || undefined,
+        termsAccepted,
+      })
+      if (!result.success) {
+        const errors = result.errors || []
+        handleValidationError(new Error(errors.join(", ")), {
+          component: "AuthForm",
+          action: "signup_validation",
+        })
+        return { isValid: false, errors }
+      }
+      return { isValid: true, errors: [] }
     }
-    
-    return null
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setFormError(null)
     setFormSuccess(null)
+    setFieldErrors({})
 
-    const validationError = validateForm()
-    if (validationError) {
-      setFormError(validationError)
+    const validation = validateForm()
+    if (!validation.isValid) {
+      setFormError(validation.errors[0] || "Please check your input")
       return
     }
 
@@ -62,7 +85,11 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
     try {
       if (mode === "login") {
         await login(email, password)
-        onSuccess()
+        setFormSuccess("Login successful! Redirecting...")
+        // Small delay to ensure auth state is fully updated
+        setTimeout(() => {
+          onSuccess()
+        }, 100)
       } else {
         await signup(email, password, fullName || undefined)
         setFormSuccess("Account created successfully. Please sign in.")
@@ -70,7 +97,21 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
         onToggleMode()
       }
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Authentication failed")
+      const errorMessage = err instanceof Error ? err.message : "Authentication failed"
+
+      // Provide more specific error messages
+      let userFriendlyMessage = errorMessage
+      if (errorMessage.includes("invalid credentials") || errorMessage.includes("unauthorized")) {
+        userFriendlyMessage = "Invalid email or password. Please try again."
+      } else if (errorMessage.includes("user already exists") || errorMessage.includes("email already")) {
+        userFriendlyMessage = "An account with this email already exists. Please sign in instead."
+      } else if (errorMessage.includes("network") || errorMessage.includes("fetch")) {
+        userFriendlyMessage = "Network error. Please check your connection and try again."
+      } else if (errorMessage.includes("rate limit")) {
+        userFriendlyMessage = "Too many attempts. Please wait a moment before trying again."
+      }
+
+      setFormError(userFriendlyMessage)
     } finally {
       setIsSubmitting(false)
     }
@@ -81,6 +122,32 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
     setConfirmPassword("")
     setTermsAccepted(false)
     setFullName("")
+    setFieldErrors({})
+  }
+
+  const handleFieldChange = (field: string, value: string | boolean) => {
+    // Clear field-specific error when user starts typing
+    if (fieldErrors[field]) {
+      setFieldErrors((prev) => ({ ...prev, [field]: "" }))
+    }
+
+    switch (field) {
+      case "email":
+        setEmail(value as string)
+        break
+      case "password":
+        setPassword(value as string)
+        break
+      case "confirmPassword":
+        setConfirmPassword(value as string)
+        break
+      case "fullName":
+        setFullName(value as string)
+        break
+      case "termsAccepted":
+        setTermsAccepted(value as boolean)
+        break
+    }
   }
 
   return (
@@ -135,9 +202,12 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
                       type="text"
                       placeholder="Full name (optional)"
                       value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      className="pl-10 h-12 glass border-border/50 focus:border-primary/50 transition-all duration-300 focus:shadow-lg focus:shadow-primary/10"
+                      onChange={(e) => handleFieldChange("fullName", e.target.value)}
+                      className={`pl-10 h-12 glass border-border/50 focus:border-primary/50 transition-all duration-300 focus:shadow-lg focus:shadow-primary/10 ${
+                        fieldErrors.fullName ? "border-destructive/50" : ""
+                      }`}
                     />
+                    {fieldErrors.fullName && <p className="text-xs text-destructive mt-1">{fieldErrors.fullName}</p>}
                   </motion.div>
                 )}
                 <motion.div
@@ -151,10 +221,13 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
                     type="email"
                     placeholder="Enter your email"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="pl-10 h-12 glass border-border/50 focus:border-primary/50 transition-all duration-300 focus:shadow-lg focus:shadow-primary/10"
+                    onChange={(e) => handleFieldChange("email", e.target.value)}
+                    className={`pl-10 h-12 glass border-border/50 focus:border-primary/50 transition-all duration-300 focus:shadow-lg focus:shadow-primary/10 ${
+                      fieldErrors.email ? "border-destructive/50" : ""
+                    }`}
                     required
                   />
+                  {fieldErrors.email && <p className="text-xs text-destructive mt-1">{fieldErrors.email}</p>}
                 </motion.div>
 
                 <motion.div
@@ -168,8 +241,10 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
                     type={showPassword ? "text" : "password"}
                     placeholder="Enter your password"
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="pl-10 pr-10 h-12 glass border-border/50 focus:border-primary/50 transition-all duration-300 focus:shadow-lg focus:shadow-primary/10"
+                    onChange={(e) => handleFieldChange("password", e.target.value)}
+                    className={`pl-10 pr-10 h-12 glass border-border/50 focus:border-primary/50 transition-all duration-300 focus:shadow-lg focus:shadow-primary/10 ${
+                      fieldErrors.password ? "border-destructive/50" : ""
+                    }`}
                     required
                   />
                   <button
@@ -179,6 +254,7 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
+                  {fieldErrors.password && <p className="text-xs text-destructive mt-1">{fieldErrors.password}</p>}
                 </motion.div>
 
                 {mode === "signup" && (
@@ -193,8 +269,10 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
                       type={showConfirmPassword ? "text" : "password"}
                       placeholder="Confirm your password"
                       value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="pl-10 pr-10 h-12 glass border-border/50 focus:border-primary/50 transition-all duration-300 focus:shadow-lg focus:shadow-primary/10"
+                      onChange={(e) => handleFieldChange("confirmPassword", e.target.value)}
+                      className={`pl-10 pr-10 h-12 glass border-border/50 focus:border-primary/50 transition-all duration-300 focus:shadow-lg focus:shadow-primary/10 ${
+                        fieldErrors.confirmPassword ? "border-destructive/50" : ""
+                      }`}
                       required
                     />
                     <button
@@ -204,6 +282,9 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
                     >
                       {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
+                    {fieldErrors.confirmPassword && (
+                      <p className="text-xs text-destructive mt-1">{fieldErrors.confirmPassword}</p>
+                    )}
                   </motion.div>
                 )}
 
@@ -217,9 +298,13 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
                     <input
                       type="checkbox"
                       checked={termsAccepted}
-                      onChange={(e) => setTermsAccepted(e.target.checked)}
+                      onChange={(e) => handleFieldChange("termsAccepted", e.target.checked)}
+                      className={fieldErrors.termsAccepted ? "border-destructive" : ""}
                     />
                     I accept the Terms of Service
+                    {fieldErrors.termsAccepted && (
+                      <p className="text-xs text-destructive ml-2">{fieldErrors.termsAccepted}</p>
+                    )}
                   </motion.label>
                 )}
               </div>

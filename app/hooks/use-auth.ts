@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { apiClient } from "@/lib/api"
 
 interface User {
@@ -12,72 +12,86 @@ export function useAuth() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const mountedRef = useRef(true)
+
+  const checkAuth = useCallback(async () => {
+    if (!mountedRef.current) return
+
+    try {
+      if (apiClient.isAuthenticated()) {
+        const userData = await apiClient.getCurrentUser()
+        if (mountedRef.current) {
+          setUser(userData)
+        }
+      }
+    } catch (err) {
+      console.error("Auth check failed:", err)
+      if (mountedRef.current) {
+        setError(err instanceof Error ? err.message : "Authentication failed")
+      }
+    } finally {
+      if (mountedRef.current) {
+        setLoading(false)
+      }
+    }
+  }, [])
 
   useEffect(() => {
+    mountedRef.current = true
     checkAuth()
 
     const handleAuthLogout = () => {
-      setUser(null)
-      setError(null)
-    }
-
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key === "access_token" && !e.newValue) {
+      if (mountedRef.current) {
         setUser(null)
         setError(null)
       }
     }
 
-    const setupEventListeners = () => {
-      if (typeof window !== "undefined") {
-        window.addEventListener("auth:logout", handleAuthLogout)
-        window.addEventListener("storage", handleStorage)
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "access_token" && !e.newValue && mountedRef.current) {
+        setUser(null)
+        setError(null)
       }
     }
 
-    const cleanupEventListeners = () => {
+    if (typeof window !== "undefined") {
+      window.addEventListener("auth:logout", handleAuthLogout)
+      window.addEventListener("storage", handleStorage)
+    }
+
+    return () => {
+      mountedRef.current = false
       if (typeof window !== "undefined") {
         window.removeEventListener("auth:logout", handleAuthLogout)
         window.removeEventListener("storage", handleStorage)
       }
     }
+  }, [checkAuth])
 
-    setupEventListeners()
-    return cleanupEventListeners
-  }, [])
-
-  const checkAuth = async () => {
-    try {
-      if (apiClient.isAuthenticated()) {
-        const userData = await apiClient.getCurrentUser()
-        setUser(userData)
-      }
-    } catch (err) {
-      console.error("Auth check failed:", err)
-      setError(err instanceof Error ? err.message : "Authentication failed")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const login = async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string) => {
     try {
       setError(null)
       setLoading(true)
       const response = await apiClient.login(email, password)
       const userData = await apiClient.getCurrentUser()
-      setUser(userData)
+      if (mountedRef.current) {
+        setUser(userData)
+      }
       return response
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Login failed"
-      setError(errorMessage)
+      if (mountedRef.current) {
+        setError(errorMessage)
+      }
       throw new Error(errorMessage)
     } finally {
-      setLoading(false)
+      if (mountedRef.current) {
+        setLoading(false)
+      }
     }
-  }
+  }, [])
 
-  const signup = async (email: string, password: string, fullName?: string) => {
+  const signup = useCallback(async (email: string, password: string, fullName?: string) => {
     try {
       setError(null)
       setLoading(true)
@@ -85,18 +99,24 @@ export function useAuth() {
       return result
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Signup failed"
-      setError(errorMessage)
+      if (mountedRef.current) {
+        setError(errorMessage)
+      }
       throw new Error(errorMessage)
     } finally {
-      setLoading(false)
+      if (mountedRef.current) {
+        setLoading(false)
+      }
     }
-  }
+  }, [])
 
-  const logout = () => {
+  const logout = useCallback(() => {
     apiClient.logout()
-    setUser(null)
-    setError(null)
-  }
+    if (mountedRef.current) {
+      setUser(null)
+      setError(null)
+    }
+  }, [])
 
   return {
     user,

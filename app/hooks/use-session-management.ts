@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useMemo } from "react"
 import { apiClient, type TherapySession } from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
 
@@ -25,54 +25,16 @@ export function useSessionManagement() {
 
   const deduplicateSessions = useCallback((sessions: TherapySession[]): TherapySession[] => {
     const seen = new Set<string>()
-    return sessions.filter(session => {
+    return sessions.filter((session) => {
       if (seen.has(session.id)) return false
       seen.add(session.id)
       return true
     })
   }, [])
 
-  const loadSessions = useCallback(
-    async (offset = 0, limit = 50, append = false) => {
-      try {
-        setState((prev) => ({ ...prev, loading: true, error: null }))
-
-        const sessions = await apiClient.getSessions(offset, limit)
-        const processedSessions = append 
-          ? deduplicateSessions([...state.sessions, ...sessions])
-          : sessions
-
-        setState((prev) => ({
-          ...prev,
-          sessions: processedSessions,
-          hasMore: sessions.length === limit,
-          loading: false,
-        }))
-
-        return sessions
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : "Failed to load sessions"
-        setState((prev) => ({
-          ...prev,
-          error: errorMessage,
-          loading: false,
-        }))
-
-        if (errorMessage === "Session expired") {
-          throw error
-        }
-
-        toast({
-          title: "Error loading sessions",
-          description: errorMessage,
-          variant: "destructive",
-        })
-
-        return []
-      }
-    },
-    [toast, deduplicateSessions, state.sessions],
-  )
+  const activeSession = useMemo(() => {
+    return state.sessions.find((session) => session.id === state.activeSessionId) || null
+  }, [state.sessions, state.activeSessionId])
 
   const persistActiveSession = useCallback((sessionId: string | null) => {
     if (typeof window !== "undefined") {
@@ -93,10 +55,7 @@ export function useSessionManagement() {
 
         setState((prev) => ({
           ...prev,
-          sessions: [
-            newSession,
-            ...prev.sessions.filter((s) => s.id !== newSession.id),
-          ],
+          sessions: [newSession, ...prev.sessions.filter((s) => s.id !== newSession.id)],
           activeSessionId: newSession.id,
           loading: false,
         }))
@@ -129,36 +88,87 @@ export function useSessionManagement() {
     [toast, persistActiveSession],
   )
 
-  const setActiveSession = useCallback((sessionId: string | null) => {
-    setState((prev) => ({ ...prev, activeSessionId: sessionId }))
-    persistActiveSession(sessionId)
-  }, [persistActiveSession])
+  const setActiveSession = useCallback(
+    (sessionId: string | null) => {
+      setState((prev) => ({ ...prev, activeSessionId: sessionId }))
+      persistActiveSession(sessionId)
+    },
+    [persistActiveSession],
+  )
 
-  // Get active session
   const getActiveSession = useCallback(() => {
-    return state.sessions.find((session) => session.id === state.activeSessionId) || null
-  }, [state.sessions, state.activeSessionId])
+    return activeSession
+  }, [activeSession])
+
+  // Restore active session
+  const restoreActiveSession = useCallback(
+    (sessions: TherapySession[]) => {
+      if (typeof window === "undefined") return
+
+      const savedActiveSessionId = localStorage.getItem("activeSessionId")
+      if (savedActiveSessionId && sessions.some((s) => s.id === savedActiveSessionId)) {
+        setState((prev) => ({ ...prev, activeSessionId: savedActiveSessionId }))
+      } else if (sessions.length > 0) {
+        const mostRecent = sessions[0]
+        setState((prev) => ({ ...prev, activeSessionId: mostRecent.id }))
+        persistActiveSession(mostRecent.id)
+      }
+    },
+    [persistActiveSession],
+  )
+
+  // Load sessions
+  const loadSessions = useCallback(
+    async (offset = 0, limit = 50, append = false) => {
+      try {
+        setState((prev) => ({ ...prev, loading: true, error: null }))
+
+        const sessions = await apiClient.getSessions(offset, limit)
+
+        setState((prev) => {
+          const processedSessions = append ? deduplicateSessions([...prev.sessions, ...sessions]) : sessions
+
+          return {
+            ...prev,
+            sessions: processedSessions,
+            hasMore: sessions.length === limit,
+            loading: false,
+          }
+        })
+
+        return sessions
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Failed to load sessions"
+        setState((prev) => ({
+          ...prev,
+          error: errorMessage,
+          loading: false,
+        }))
+
+        if (errorMessage === "Session expired") {
+          throw error
+        }
+
+        toast({
+          title: "Error loading sessions",
+          description: errorMessage,
+          variant: "destructive",
+        })
+
+        return []
+      }
+    },
+    [toast, deduplicateSessions], // Removed state.sessions from dependencies
+  )
 
   // Load more sessions (for infinite scroll)
   const loadMoreSessions = useCallback(() => {
     if (!state.loading && state.hasMore) {
-      loadSessions(state.sessions.length, 50, true)
+      return loadSessions(state.sessions.length, 50, true)
     }
   }, [state.loading, state.hasMore, state.sessions.length, loadSessions])
 
-  const restoreActiveSession = useCallback((sessions: TherapySession[]) => {
-    if (typeof window === "undefined") return
-    
-    const savedActiveSessionId = localStorage.getItem("activeSessionId")
-    if (savedActiveSessionId && sessions.some((s) => s.id === savedActiveSessionId)) {
-      setState((prev) => ({ ...prev, activeSessionId: savedActiveSessionId }))
-    } else if (sessions.length > 0) {
-      const mostRecent = sessions[0]
-      setState((prev) => ({ ...prev, activeSessionId: mostRecent.id }))
-      persistActiveSession(mostRecent.id)
-    }
-  }, [persistActiveSession])
-
+  // Initialize sessions
   const initializeSessions = useCallback(async () => {
     try {
       const sessions = await loadSessions()
@@ -166,7 +176,7 @@ export function useSessionManagement() {
     } catch (error) {
       console.error("Failed to initialize sessions:", error)
     }
-  }, []) // Remove dependencies to prevent infinite re-renders
+  }, [loadSessions, restoreActiveSession])
 
   // Search sessions
   const searchSessions = useCallback(

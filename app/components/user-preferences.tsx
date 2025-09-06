@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
@@ -14,12 +14,12 @@ import { Settings, Save, Loader2, Bell, Shield, Palette } from "lucide-react"
 import { motion } from "framer-motion"
 
 interface Preferences {
-  theme: string
+  theme: "light" | "dark" | "system"
   notifications: boolean
   crisis_alerts: boolean
   session_reminders: boolean
   privacy_mode: boolean
-  language: string
+  language: "en" | "es" | "fr" | "de"
 }
 
 export function UserPreferences() {
@@ -27,53 +27,76 @@ export function UserPreferences() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const mountedRef = useRef(true)
   const { toast } = useToast()
 
-  useEffect(() => {
-    loadPreferences()
-  }, [])
+  const loadPreferences = useCallback(async () => {
+    if (!mountedRef.current) return
 
-  const loadPreferences = async () => {
     try {
       setError(null)
       const prefs = await apiClient.getUserPreferences()
-      setPreferences(prefs as Preferences)
+      if (mountedRef.current) {
+        setPreferences(prefs as Preferences)
+      }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to load preferences"
-      setError(errorMessage)
+      if (mountedRef.current) {
+        const errorMessage = error instanceof Error ? error.message : "Failed to load preferences"
+        setError(errorMessage)
+      }
     } finally {
-      setLoading(false)
+      if (mountedRef.current) {
+        setLoading(false)
+      }
     }
-  }
+  }, [])
 
-  const savePreferences = async () => {
-    if (!preferences) return
+  const savePreferences = useCallback(async () => {
+    if (!preferences || !mountedRef.current) return
 
     try {
       setSaving(true)
       setError(null)
       await apiClient.updateUserPreferences(preferences)
-      toast({
-        title: "Preferences saved",
-        description: "Your preferences have been updated successfully.",
-      })
+      if (mountedRef.current) {
+        toast({
+          title: "Preferences saved",
+          description: "Your preferences have been updated successfully.",
+        })
+      }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to save preferences"
-      setError(errorMessage)
-      toast({
-        title: "Save failed",
-        description: errorMessage,
-        variant: "destructive",
-      })
+      if (mountedRef.current) {
+        const errorMessage = error instanceof Error ? error.message : "Failed to save preferences"
+        setError(errorMessage)
+        toast({
+          title: "Save failed",
+          description: errorMessage,
+          variant: "destructive",
+        })
+      }
     } finally {
-      setSaving(false)
+      if (mountedRef.current) {
+        setSaving(false)
+      }
     }
-  }
+  }, [preferences, toast])
 
-  const updatePreference = (key: keyof Preferences, value: any) => {
-    if (!preferences) return
-    setPreferences({ ...preferences, [key]: value })
-  }
+  const updatePreference = useCallback(
+    <K extends keyof Preferences>(key: K, value: Preferences[K]) => {
+      if (!preferences) return
+      setPreferences({ ...preferences, [key]: value })
+    },
+    [preferences],
+  )
+
+  useEffect(() => {
+    mountedRef.current = true
+    loadPreferences()
+
+    return () => {
+      mountedRef.current = false
+    }
+  }, [loadPreferences])
 
   if (loading) {
     return (
@@ -124,7 +147,10 @@ export function UserPreferences() {
                 <Label htmlFor="theme" className="text-sm">
                   Theme
                 </Label>
-                <Select value={preferences.theme} onValueChange={(value) => updatePreference("theme", value)}>
+                <Select
+                  value={preferences.theme}
+                  onValueChange={(value: Preferences["theme"]) => updatePreference("theme", value)}
+                >
                   <SelectTrigger className="glass border-border/50">
                     <SelectValue />
                   </SelectTrigger>
@@ -140,7 +166,10 @@ export function UserPreferences() {
                 <Label htmlFor="language" className="text-sm">
                   Language
                 </Label>
-                <Select value={preferences.language} onValueChange={(value) => updatePreference("language", value)}>
+                <Select
+                  value={preferences.language}
+                  onValueChange={(value: Preferences["language"]) => updatePreference("language", value)}
+                >
                   <SelectTrigger className="glass border-border/50">
                     <SelectValue />
                   </SelectTrigger>

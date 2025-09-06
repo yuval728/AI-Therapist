@@ -1,13 +1,13 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Plus, Search, MessageCircle, Calendar, Loader2 } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
-import { cn, formatDate, truncateText } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import type { TherapySession } from "@/lib/api"
 
 interface SessionListProps {
@@ -32,35 +32,13 @@ export function SessionList({
   onSearch,
 }: SessionListProps) {
   const [searchQuery, setSearchQuery] = useState("")
-  const [filteredSessions, setFilteredSessions] = useState<TherapySession[]>(sessions)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
+  const observerRef = useRef<IntersectionObserver | null>(null)
 
-  const updateFilteredSessions = useCallback(() => {
-    const filtered = searchQuery ? onSearch(searchQuery) : sessions
-    setFilteredSessions(filtered)
+  const filteredSessions = useMemo(() => {
+    return searchQuery ? onSearch(searchQuery) : sessions
   }, [searchQuery, sessions, onSearch])
-
-  useEffect(() => {
-    updateFilteredSessions()
-  }, [updateFilteredSessions])
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loading) {
-          onLoadMore()
-        }
-      },
-      { threshold: 0.1 },
-    )
-
-    if (loadMoreRef.current) {
-      observer.observe(loadMoreRef.current)
-    }
-
-    return () => observer.disconnect()
-  }, [hasMore, loading, onLoadMore])
 
   const formatSessionDate = useCallback((dateString: string) => {
     const date = new Date(dateString)
@@ -90,6 +68,36 @@ export function SessionList({
 
     return emotionColors[emotion.toLowerCase()] || "bg-gray-500/10 text-gray-600"
   }, [])
+
+  useEffect(() => {
+    const setupObserver = () => {
+      if (observerRef.current) {
+        observerRef.current.disconnect()
+      }
+
+      observerRef.current = new IntersectionObserver(
+        (entries) => {
+          if (entries[0].isIntersecting && hasMore && !loading) {
+            onLoadMore()
+          }
+        },
+        { threshold: 0.1 },
+      )
+
+      if (loadMoreRef.current) {
+        observerRef.current.observe(loadMoreRef.current)
+      }
+    }
+
+    setupObserver()
+
+    return () => {
+      if (observerRef.current) {
+        observerRef.current.disconnect()
+        observerRef.current = null
+      }
+    }
+  }, [hasMore, loading, onLoadMore])
 
   return (
     <div className="flex flex-col h-full bg-background/50 backdrop-blur-sm border-r border-border/50">

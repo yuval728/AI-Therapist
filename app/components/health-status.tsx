@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -22,25 +22,45 @@ export function HealthStatus() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [lastChecked, setLastChecked] = useState<Date | null>(null)
+  const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const mountedRef = useRef(true)
 
   const checkHealth = useCallback(async () => {
+    if (!mountedRef.current) return
+
     try {
       setError(null)
       const healthData = await apiClient.getHealthStatus()
-      setHealth(healthData)
-      setLastChecked(new Date())
+
+      if (mountedRef.current) {
+        setHealth(healthData)
+        setLastChecked(new Date())
+      }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Health check failed"
-      setError(errorMessage)
+      if (mountedRef.current) {
+        const errorMessage = error instanceof Error ? error.message : "Health check failed"
+        setError(errorMessage)
+      }
     } finally {
-      setLoading(false)
+      if (mountedRef.current) {
+        setLoading(false)
+      }
     }
   }, [])
 
   useEffect(() => {
+    mountedRef.current = true
     checkHealth()
-    const interval = setInterval(checkHealth, 30000)
-    return () => clearInterval(interval)
+
+    intervalRef.current = setInterval(checkHealth, 30000)
+
+    return () => {
+      mountedRef.current = false
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
+    }
   }, [checkHealth])
 
   const getStatusConfig = useCallback((status: string) => {
@@ -68,13 +88,15 @@ export function HealthStatus() {
       },
     } as const
 
-    return configs[status.toLowerCase() as keyof typeof configs] || {
-      icon: AlertTriangle,
-      color: "text-gray-600",
-      bgColor: "bg-gray-500/10",
-      borderColor: "border-gray-500/20",
-      label: "Unknown",
-    }
+    return (
+      configs[status.toLowerCase() as keyof typeof configs] || {
+        icon: AlertTriangle,
+        color: "text-gray-600",
+        bgColor: "bg-gray-500/10",
+        borderColor: "border-gray-500/20",
+        label: "Unknown",
+      }
+    )
   }, [])
 
   const statusConfig = health ? getStatusConfig(health.status) : null
@@ -143,9 +165,7 @@ export function HealthStatus() {
 
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Last Updated</span>
-                    <span className="text-foreground font-medium">
-                      {formatTimestamp(health.timestamp)}
-                    </span>
+                    <span className="text-foreground font-medium">{formatTimestamp(health.timestamp)}</span>
                   </div>
 
                   {lastChecked && (

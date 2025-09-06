@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { motion } from "framer-motion"
 
 interface StreamingTextProps {
@@ -12,14 +12,11 @@ interface StreamingTextProps {
 
 const DEFAULT_SPEED = 20
 
-export function StreamingText({ 
-  content, 
-  isStreaming, 
-  onComplete, 
-  speed = DEFAULT_SPEED 
-}: StreamingTextProps) {
+export function StreamingText({ content, isStreaming, onComplete, speed = DEFAULT_SPEED }: StreamingTextProps) {
   const [displayedContent, setDisplayedContent] = useState("")
   const [currentIndex, setCurrentIndex] = useState(0)
+  const timerRef = useRef<NodeJS.Timeout | null>(null)
+  const mountedRef = useRef(true)
 
   const resetContent = useCallback(() => {
     setDisplayedContent("")
@@ -27,21 +24,43 @@ export function StreamingText({
   }, [])
 
   useEffect(() => {
+    mountedRef.current = true
     resetContent()
+
+    return () => {
+      mountedRef.current = false
+      if (timerRef.current) {
+        clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
+    }
   }, [content, resetContent])
 
   useEffect(() => {
-    if (isStreaming && currentIndex < content.length) {
-      const timer = setTimeout(() => {
-        setDisplayedContent(content.slice(0, currentIndex + 1))
-        setCurrentIndex(prev => prev + 1)
-      }, speed)
+    // Clear any existing timer
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
 
-      return () => clearTimeout(timer)
-    } else if (!isStreaming && content) {
+    if (isStreaming && currentIndex < content.length && mountedRef.current) {
+      timerRef.current = setTimeout(() => {
+        if (mountedRef.current) {
+          setDisplayedContent(content.slice(0, currentIndex + 1))
+          setCurrentIndex((prev) => prev + 1)
+        }
+      }, speed)
+    } else if (!isStreaming && content && mountedRef.current) {
       setDisplayedContent(content)
       setCurrentIndex(content.length)
       onComplete?.()
+    }
+
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
     }
   }, [content, currentIndex, isStreaming, onComplete, speed])
 
@@ -51,10 +70,10 @@ export function StreamingText({
       {isStreaming && (
         <motion.span
           animate={{ opacity: [1, 0] }}
-          transition={{ 
-            duration: 0.8, 
-            repeat: Infinity, 
-            repeatType: "reverse" 
+          transition={{
+            duration: 0.8,
+            repeat: Number.POSITIVE_INFINITY,
+            repeatType: "reverse",
           }}
           className="inline-block w-2 h-4 bg-primary/60 ml-1"
         />

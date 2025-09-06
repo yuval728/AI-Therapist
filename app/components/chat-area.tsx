@@ -44,6 +44,9 @@ interface ChatAreaProps {
   onLoadOlder?: () => Promise<void> | void
   hasMoreHistory?: boolean
   historyLoading?: boolean
+  // New props for improved loading
+  messagesLoading?: boolean
+  messagesInitialized?: boolean
 }
 
 export function ChatArea({
@@ -57,6 +60,8 @@ export function ChatArea({
   onLoadOlder,
   hasMoreHistory,
   historyLoading,
+  messagesLoading,
+  messagesInitialized,
 }: ChatAreaProps) {
   const isConnected = connectionStatus === "connected"
   // Allow typing even when disconnected; sendMessage will lazy-connect
@@ -105,20 +110,14 @@ export function ChatArea({
 
       {/* Messages with Load Older */}
       <div className="flex-1 overflow-hidden">
-        <div className="px-4 pt-4">
-          {hasMoreHistory && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={historyLoading}
-              onClick={() => onLoadOlder && onLoadOlder()}
-              className="w-full mb-2"
-            >
-              {historyLoading ? "Loading..." : "Load older messages"}
-            </Button>
-          )}
-        </div>
-        <MessageList messages={allMessages} isTyping={isTyping && !streamingState.isStreaming} />
+        <MessageList 
+          messages={allMessages} 
+          isTyping={isTyping && !streamingState.isStreaming}
+          onLoadMore={onLoadOlder}
+          hasMore={hasMoreHistory}
+          isLoadingMore={historyLoading}
+          loading={messagesLoading}
+        />
       </div>
 
       {/* Session Metadata */}

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -31,6 +31,7 @@ import { useToast } from "@/hooks/use-toast"
 export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [rightPanelTab, setRightPanelTab] = useState("summary")
+  const mountedRef = useRef(true)
   const { user, logout, loading: authLoading } = useAuth()
   const router = useRouter()
   const { toast } = useToast()
@@ -61,16 +62,58 @@ export function AppShell() {
     loadOlderMessages,
     historyLoading,
     hasMoreHistory,
+    messagesLoading,
+    messagesInitialized,
   } = useWebSocketChat(activeSessionId || undefined)
+
+  const handleNewSession = useCallback(async () => {
+    try {
+      await createSession()
+      setSidebarOpen(false) // Close sidebar on mobile after creating session
+    } catch (error) {
+      console.error("Failed to create session:", error)
+    }
+  }, [createSession])
+
+  const handleSessionSelect = useCallback(
+    (sessionId: string) => {
+      setActiveSession(sessionId)
+      setSidebarOpen(false) // Close sidebar on mobile after selecting session
+    },
+    [setActiveSession],
+  )
+
+  const handleLogout = useCallback(() => {
+    disconnect()
+    logout()
+    toast({
+      title: "Logged out",
+      description: "You have been successfully logged out.",
+    })
+    router.push("/auth")
+  }, [disconnect, logout, toast, router])
+
+  const handleProfileClick = useCallback(() => {
+    router.push("/profile")
+  }, [router])
+
+  const handleStatsClick = useCallback(() => {
+    router.push("/stats")
+  }, [router])
 
   // Initialize sessions on mount (only once)
   useEffect(() => {
+    mountedRef.current = true
     initializeSessions()
-  }, []) // Remove dependency to prevent re-initialization
+
+    return () => {
+      mountedRef.current = false
+    }
+  }, [initializeSessions])
 
   // Redirect to auth if user becomes unauthenticated
   useEffect(() => {
-    if (!authLoading && !user) {
+    if (!authLoading && !user && mountedRef.current) {
       // Ensure we fully disconnect and clear any active session state
       disconnect()
       setActiveSession(null)
@@ -83,45 +126,19 @@ export function AppShell() {
 
   // Connect WS when a session is selected; disconnect when none is active
   useEffect(() => {
-    if (activeSessionId) {
+    if (activeSessionId && mountedRef.current) {
       connect()
-    } else {
+    } else if (!activeSessionId) {
       disconnect()
     }
-    return () => disconnect()
-  }, [activeSessionId, connect, disconnect])
+  }, [activeSessionId]) // Remove connect/disconnect from dependencies
 
-  const handleNewSession = async () => {
-    try {
-      await createSession()
-      setSidebarOpen(false) // Close sidebar on mobile after creating session
-    } catch (error) {
-      console.error("Failed to create session:", error)
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      disconnect()
     }
-  }
-
-  const handleSessionSelect = (sessionId: string) => {
-    setActiveSession(sessionId)
-    setSidebarOpen(false) // Close sidebar on mobile after selecting session
-  }
-
-  const handleLogout = () => {
-    disconnect()
-    logout()
-    toast({
-      title: "Logged out",
-      description: "You have been successfully logged out.",
-    })
-    router.push("/auth")
-  }
-
-  const handleProfileClick = () => {
-    router.push("/profile")
-  }
-
-  const handleStatsClick = () => {
-    router.push("/stats")
-  }
+  }, []) // Empty dependency array for cleanup only
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-background via-background to-secondary/20">
@@ -230,7 +247,7 @@ export function AppShell() {
       <div className="flex-1 flex overflow-hidden">
         {/* Left Sidebar */}
         <AnimatePresence>
-          {(sidebarOpen || window.innerWidth >= 1024) && (
+          {(sidebarOpen || (typeof window !== "undefined" && window.innerWidth >= 1024)) && (
             <motion.aside
               initial={{ x: -320, opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
@@ -284,6 +301,8 @@ export function AppShell() {
               onLoadOlder={loadOlderMessages}
               hasMoreHistory={hasMoreHistory}
               historyLoading={historyLoading}
+              messagesLoading={messagesLoading}
+              messagesInitialized={messagesInitialized}
             />
           </div>
 
@@ -314,7 +333,11 @@ export function AppShell() {
 
               <div className="flex-1 overflow-hidden">
                 <TabsContent value="summary" className="h-full m-0">
-                  <SessionSummary sessionId={activeSessionId} />
+                  <SessionSummary 
+                    sessionId={activeSessionId} 
+                    messagesInitialized={messagesInitialized}
+                    delayMs={1500}
+                  />
                 </TabsContent>
                 <TabsContent value="preferences" className="h-full m-0">
                   <UserPreferences />

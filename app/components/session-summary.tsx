@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -24,36 +24,70 @@ interface SessionSummaryData {
 
 interface SessionSummaryProps {
   sessionId: string | null
+  messagesInitialized?: boolean
+  delayMs?: number
 }
 
-export function SessionSummary({ sessionId }: SessionSummaryProps) {
+export function SessionSummary({ sessionId, messagesInitialized = true, delayMs = 1000 }: SessionSummaryProps) {
   const [summary, setSummary] = useState<SessionSummaryData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [shouldLoad, setShouldLoad] = useState(false)
+  const mountedRef = useRef(true)
 
-  useEffect(() => {
-    if (sessionId) {
-      loadSummary()
-    } else {
-      setSummary(null)
-    }
-  }, [sessionId])
-
-  const loadSummary = async () => {
-    if (!sessionId) return
+  const loadSummary = useCallback(async () => {
+    if (!sessionId || !mountedRef.current) return
 
     try {
       setLoading(true)
       setError(null)
       const summaryData = await apiClient.getSessionSummary(sessionId)
-      setSummary(summaryData as SessionSummaryData)
+      if (mountedRef.current) {
+        setSummary(summaryData as unknown as SessionSummaryData)
+      }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to load session summary"
-      setError(errorMessage)
+      if (mountedRef.current) {
+        const errorMessage = error instanceof Error ? error.message : "Failed to load session summary"
+        setError(errorMessage)
+      }
     } finally {
-      setLoading(false)
+      if (mountedRef.current) {
+        setLoading(false)
+      }
     }
-  }
+  }, [sessionId])
+
+  useEffect(() => {
+    mountedRef.current = true
+
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  // Delay loading until messages are initialized
+  useEffect(() => {
+    if (messagesInitialized && sessionId) {
+      const timer = setTimeout(() => {
+        if (mountedRef.current) {
+          setShouldLoad(true)
+        }
+      }, delayMs)
+
+      return () => clearTimeout(timer)
+    } else {
+      setShouldLoad(false)
+      setSummary(null)
+      setError(null)
+    }
+  }, [messagesInitialized, sessionId, delayMs])
+
+  // Load summary when shouldLoad becomes true
+  useEffect(() => {
+    if (shouldLoad) {
+      loadSummary()
+    }
+  }, [shouldLoad, loadSummary])
 
   const getEmotionColor = (emotion: string) => {
     const colors: Record<string, string> = {

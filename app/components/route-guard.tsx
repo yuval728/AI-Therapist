@@ -25,8 +25,13 @@ export function RouteGuard({ children, requireAuth = true, redirectTo }: RouteGu
       }
 
       if (!requireAuth && isAuthenticated) {
-        router.push(redirectTo || "/chat")
-        return
+        // Add small delay to prevent race condition with manual navigation
+        const timer = setTimeout(() => {
+          router.push(redirectTo || "/chat")
+        }, 150)
+        
+        // Clear timeout if component unmounts
+        return () => clearTimeout(timer)
       }
 
       setIsAuthorized(true)
