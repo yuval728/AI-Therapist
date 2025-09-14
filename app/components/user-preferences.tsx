@@ -1,24 +1,20 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
+import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { apiClient } from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
-import { Settings, Save, Loader2, Bell, Shield, Palette } from "lucide-react"
+import { Settings, Save, Loader2, Palette } from "lucide-react"
 import { motion } from "framer-motion"
 
 interface Preferences {
   theme: "light" | "dark" | "system"
-  notifications: boolean
-  crisis_alerts: boolean
-  session_reminders: boolean
-  privacy_mode: boolean
   language: "en" | "es" | "fr" | "de"
 }
 
@@ -29,27 +25,32 @@ export function UserPreferences() {
   const [error, setError] = useState<string | null>(null)
   const mountedRef = useRef(true)
   const { toast } = useToast()
+  const { theme, setTheme } = useTheme()
 
   const loadPreferences = useCallback(async () => {
     if (!mountedRef.current) return
 
     try {
       setError(null)
+      console.log("Loading preferences...")
       const prefs = await apiClient.getUserPreferences()
       if (mountedRef.current) {
-        setPreferences(prefs as Preferences)
+        const prefsData = prefs as unknown as Preferences
+        setPreferences(prefsData)
+        console.log("Preferences loaded:", prefsData)
       }
     } catch (error) {
       if (mountedRef.current) {
         const errorMessage = error instanceof Error ? error.message : "Failed to load preferences"
         setError(errorMessage)
+        console.error("Failed to load preferences:", error)
       }
     } finally {
       if (mountedRef.current) {
         setLoading(false)
       }
     }
-  }, [])
+  }, []) // Remove theme and setTheme from dependencies to prevent infinite loop
 
   const savePreferences = useCallback(async () => {
     if (!preferences || !mountedRef.current) return
@@ -57,7 +58,7 @@ export function UserPreferences() {
     try {
       setSaving(true)
       setError(null)
-      await apiClient.updateUserPreferences(preferences)
+      await apiClient.updateUserPreferences(preferences as unknown as Record<string, unknown>)
       if (mountedRef.current) {
         toast({
           title: "Preferences saved",
@@ -85,8 +86,13 @@ export function UserPreferences() {
     <K extends keyof Preferences>(key: K, value: Preferences[K]) => {
       if (!preferences) return
       setPreferences({ ...preferences, [key]: value })
+      
+      // Immediately apply theme changes to next-themes
+      if (key === "theme" && typeof value === "string") {
+        setTheme(value)
+      }
     },
-    [preferences],
+    [preferences, setTheme],
   )
 
   useEffect(() => {
@@ -97,6 +103,14 @@ export function UserPreferences() {
       mountedRef.current = false
     }
   }, [loadPreferences])
+
+  // Separate effect to sync theme with preferences
+  useEffect(() => {
+    if (preferences?.theme && theme !== preferences.theme) {
+      console.log(`Syncing theme from ${theme} to ${preferences.theme}`)
+      setTheme(preferences.theme)
+    }
+  }, [preferences?.theme, theme, setTheme])
 
   if (loading) {
     return (
@@ -185,92 +199,8 @@ export function UserPreferences() {
           </Card>
         </motion.div>
 
-        {/* Notifications */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-          <Card className="glass border-border/30">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <Bell className="w-4 h-4 text-primary" />
-                Notifications
-              </CardTitle>
-              <CardDescription className="text-xs">Manage your notification preferences</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label htmlFor="notifications" className="text-sm">
-                    General Notifications
-                  </Label>
-                  <p className="text-xs text-muted-foreground">Receive general app notifications</p>
-                </div>
-                <Switch
-                  id="notifications"
-                  checked={preferences.notifications}
-                  onCheckedChange={(checked) => updatePreference("notifications", checked)}
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label htmlFor="crisis-alerts" className="text-sm">
-                    Crisis Alerts
-                  </Label>
-                  <p className="text-xs text-muted-foreground">Important mental health alerts</p>
-                </div>
-                <Switch
-                  id="crisis-alerts"
-                  checked={preferences.crisis_alerts}
-                  onCheckedChange={(checked) => updatePreference("crisis_alerts", checked)}
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label htmlFor="session-reminders" className="text-sm">
-                    Session Reminders
-                  </Label>
-                  <p className="text-xs text-muted-foreground">Reminders for scheduled sessions</p>
-                </div>
-                <Switch
-                  id="session-reminders"
-                  checked={preferences.session_reminders}
-                  onCheckedChange={(checked) => updatePreference("session_reminders", checked)}
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        {/* Privacy */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
-          <Card className="glass border-border/30">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <Shield className="w-4 h-4 text-primary" />
-                Privacy & Security
-              </CardTitle>
-              <CardDescription className="text-xs">Control your privacy settings</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label htmlFor="privacy-mode" className="text-sm">
-                    Privacy Mode
-                  </Label>
-                  <p className="text-xs text-muted-foreground">Enhanced privacy for sensitive conversations</p>
-                </div>
-                <Switch
-                  id="privacy-mode"
-                  checked={preferences.privacy_mode}
-                  onCheckedChange={(checked) => updatePreference("privacy_mode", checked)}
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-
         {/* Save Button */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
           <Button onClick={savePreferences} disabled={saving} className="w-full">
             {saving ? (
               <>

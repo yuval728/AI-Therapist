@@ -1,15 +1,16 @@
 import type React from "react"
 import type { Metadata } from "next"
-import { Geist } from "next/font/google"
+import { Inter } from "next/font/google"
 import { Manrope } from "next/font/google"
 import "./globals.css"
 import { AppErrorBoundary } from "@/components/error-boundary"
+import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/toaster"
 
-const geist = Geist({
+const inter = Inter({
   subsets: ["latin"],
   display: "swap",
-  variable: "--font-geist",
+  variable: "--font-inter",
 })
 
 const manrope = Manrope({
@@ -30,15 +31,22 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className={`${geist.variable} ${manrope.variable} antialiased`} suppressHydrationWarning>
+    <html lang="en" className={`${inter.variable} ${manrope.variable} antialiased`} suppressHydrationWarning>
       <body
         className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/20"
         suppressHydrationWarning
       >
-        <AppErrorBoundary>
-          {children}
-          <Toaster />
-        </AppErrorBoundary>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange={false}
+        >
+          <AppErrorBoundary>
+            {children}
+            <Toaster />
+          </AppErrorBoundary>
+        </ThemeProvider>
       </body>
     </html>
   )

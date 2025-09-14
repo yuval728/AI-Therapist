@@ -225,25 +225,25 @@ class UserService:
         
         try:
             # Get therapy sessions count
-            sessions_result = await self.supabase_client.client.table("therapy_sessions")\
+            sessions_result = self.supabase_client.client.table("therapy_sessions")\
                 .select("count", count="exact")\
                 .eq("user_id", user_id)\
                 .execute()
             
             # Get memory logs count
-            memory_result = await self.supabase_client.client.table("memory_logs")\
+            memory_result = self.supabase_client.client.table("memory_logs")\
                 .select("count", count="exact")\
                 .eq("user_id", user_id)\
                 .execute()
             
             # Get crisis events count
-            crisis_result = await self.supabase_client.client.table("crisis_events")\
+            crisis_result = self.supabase_client.client.table("crisis_events")\
                 .select("count", count="exact")\
                 .eq("user_id", user_id)\
                 .execute()
             
             # Get recent activity
-            recent_sessions = await self.supabase_client.client.table("therapy_sessions")\
+            recent_sessions = self.supabase_client.client.table("therapy_sessions")\
                 .select("created_at, emotion, crisis_level")\
                 .eq("user_id", user_id)\
                 .order("created_at", desc=True)\

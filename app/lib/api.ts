@@ -589,10 +589,6 @@ class ApiClient {
       await simulateDelay(300)
       return {
         theme: "light",
-        notifications: true,
-        crisis_alerts: true,
-        session_reminders: false,
-        privacy_mode: false,
         language: "en",
       }
     }
