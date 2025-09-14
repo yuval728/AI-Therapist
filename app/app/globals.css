@@ -123,7 +123,8 @@
     @apply bg-background text-foreground;
     /* Added backdrop blur for glassmorphism support */
     backdrop-filter: blur(10px);
-    overflow: hidden; /* Prevent page-level scrolling */
+    /* Allow page-level scrolling with custom scrollbar */
+    overflow-y: auto;
   }
 
   /* Added glassmorphism utility classes */

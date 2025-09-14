@@ -1,10 +1,11 @@
 """User management service layer."""
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from collections import defaultdict
 
 from src.database import get_supabase_client
 from src.models import User, APIResponse
-from src.utils import log_therapy_event, timing_decorator, ValidationError
+from src.utils import log_therapy_event, timing_decorator
 
 
 class UserService:
@@ -220,43 +221,45 @@ class UserService:
     
     @timing_decorator("user_get_stats")
     async def get_user_stats(self, user_id: str) -> APIResponse[Dict[str, Any]]:
-        """Get user statistics and activity summary."""
+        """Get comprehensive user statistics and activity summary."""
         await self._ensure_initialized()
         
         try:
-            # Get therapy sessions count
+            # Calculate date ranges
+            now = datetime.now(timezone.utc)
+            week_ago = now - timedelta(days=7)
+            month_ago = now - timedelta(days=30)
+            
+            # Get therapy sessions with emotion and crisis data
             sessions_result = self.supabase_client.client.table("therapy_sessions")\
-                .select("count", count="exact")\
-                .eq("user_id", user_id)\
-                .execute()
-            
-            # Get memory logs count
-            memory_result = self.supabase_client.client.table("memory_logs")\
-                .select("count", count="exact")\
-                .eq("user_id", user_id)\
-                .execute()
-            
-            # Get crisis events count
-            crisis_result = self.supabase_client.client.table("crisis_events")\
-                .select("count", count="exact")\
-                .eq("user_id", user_id)\
-                .execute()
-            
-            # Get recent activity
-            recent_sessions = self.supabase_client.client.table("therapy_sessions")\
-                .select("created_at, emotion, crisis_level")\
+                .select("id, created_at, emotion, crisis_level, session_summary")\
                 .eq("user_id", user_id)\
                 .order("created_at", desc=True)\
-                .limit(5)\
                 .execute()
             
-            stats = {
-                "total_sessions": sessions_result.count if sessions_result else 0,
-                "total_messages": memory_result.count if memory_result else 0,
-                "crisis_events": crisis_result.count if crisis_result else 0,
-                "recent_sessions": recent_sessions.data if recent_sessions else [],
-                "last_active": datetime.now(timezone.utc).isoformat()
-            }
+            sessions = sessions_result.data if sessions_result and sessions_result.data else []
+            
+            # Get memory logs for message count and session duration calculation
+            memory_result = self.supabase_client.client.table("memory_logs")\
+                .select("id, session_id, timestamp, role, message_type")\
+                .eq("user_id", user_id)\
+                .order("timestamp", desc=True)\
+                .execute()
+            
+            memory_logs = memory_result.data if memory_result and memory_result.data else []
+            
+            # Get crisis events
+            crisis_result = self.supabase_client.client.table("crisis_events")\
+                .select("id, created_at, crisis_level, resolved")\
+                .eq("user_id", user_id)\
+                .execute()
+            
+            crisis_events = crisis_result.data if crisis_result and crisis_result.data else []
+            
+            # Calculate comprehensive stats
+            stats = await self._calculate_comprehensive_stats(
+                sessions, memory_logs, crisis_events, now, week_ago, month_ago
+            )
             
             return APIResponse(
                 success=True,
@@ -274,6 +277,243 @@ class UserService:
                 error="Failed to retrieve user statistics",
                 error_code="INTERNAL_ERROR"
             )
+    
+    async def _calculate_comprehensive_stats(
+        self, 
+        sessions: List[Dict], 
+        memory_logs: List[Dict], 
+        crisis_events: List[Dict],
+        now: datetime,
+        week_ago: datetime, 
+        month_ago: datetime
+    ) -> Dict[str, Any]:
+        """Calculate comprehensive statistics from raw data."""
+        # Basic counts
+        total_sessions = len(sessions)
+        total_messages = len([log for log in memory_logs if log.get('role') == 'user'])
+        crisis_count = len(crisis_events)
+        
+        # Calculate streak (consecutive days with sessions)
+        streak_days = self._calculate_streak(sessions, now)
+        
+        # Calculate emotion distribution
+        emotion_distribution = self._calculate_emotion_distribution(sessions, memory_logs)
+        
+        # Calculate weekly activity
+        weekly_activity = self._calculate_weekly_activity(sessions, memory_logs, week_ago, now)
+        
+        # Extract just the session counts for frontend compatibility
+        weekly_sessions = [day['sessions'] for day in weekly_activity]
+        
+        # Calculate improvement score based on multiple factors
+        improvement_score = self._calculate_improvement_score(
+            sessions, crisis_events, now, month_ago
+        )
+        
+        # Calculate average session duration from memory logs
+        avg_session_duration = self._calculate_avg_session_duration(memory_logs)
+        
+        # Recent activity summary
+        recent_sessions = sessions[:5] if sessions else []
+        
+        # Weekly summary
+        week_sessions = [s for s in sessions 
+                        if datetime.fromisoformat(s['created_at'].replace('Z', '+00:00')) >= week_ago]
+        
+        return {
+            "total_sessions": total_sessions,
+            "total_messages": total_messages,
+            "crisis_events": crisis_count,
+            "streak_days": streak_days,
+            "improvement_score": improvement_score,
+            "emotion_distribution": emotion_distribution,
+            "weekly_sessions": weekly_sessions,  # Array of session counts for frontend
+            "weekly_activity": weekly_activity,   # Detailed activity for backend use
+            "avg_session_duration": avg_session_duration,
+            "recent_sessions": recent_sessions,
+            "week_summary": {
+                "sessions": len(week_sessions),
+                "messages": len([log for log in memory_logs 
+                               if datetime.fromisoformat(log['timestamp'].replace('Z', '+00:00')) >= week_ago 
+                               and log.get('role') == 'user']),
+                "crisis_events": len([e for e in crisis_events 
+                                    if datetime.fromisoformat(e['created_at'].replace('Z', '+00:00')) >= week_ago])
+            },
+            "last_session": sessions[0]['created_at'] if sessions else now.isoformat(),
+            "last_active": sessions[0]['created_at'] if sessions else now.isoformat()
+        }
+    
+    def _calculate_streak(self, sessions: List[Dict], now: datetime) -> int:
+        """Calculate consecutive days with therapy sessions."""
+        if not sessions:
+            return 0
+        
+        # Group sessions by date
+        session_dates = set()
+        for session in sessions:
+            session_date = datetime.fromisoformat(session['created_at'].replace('Z', '+00:00')).date()
+            session_dates.add(session_date)
+        
+        # Calculate streak from today backwards
+        current_date = now.date()
+        streak = 0
+        
+        while current_date in session_dates:
+            streak += 1
+            current_date -= timedelta(days=1)
+        
+        return streak
+    
+    def _calculate_emotion_distribution(self, sessions: List[Dict], memory_logs: List[Dict]) -> Dict[str, int]:
+        """Calculate distribution of emotions from sessions and memory logs."""
+        emotion_counts = defaultdict(int)
+        
+        # Count emotions from therapy sessions
+        for session in sessions:
+            emotion = session.get('emotion')
+            if emotion and emotion.strip():
+                emotion_counts[emotion.lower()] += 1
+        
+        # Count emotions from memory logs
+        for log in memory_logs:
+            emotion = log.get('emotion')
+            if emotion and emotion.strip():
+                emotion_counts[emotion.lower()] += 1
+        
+        # Convert to regular dict and ensure common emotions are present
+        common_emotions = ['happy', 'sad', 'anxious', 'angry', 'calm', 'stressed', 'neutral']
+        distribution = {}
+        
+        for emotion in common_emotions:
+            distribution[emotion] = emotion_counts.get(emotion, 0)
+        
+        # Add any other emotions found
+        for emotion, count in emotion_counts.items():
+            if emotion not in distribution:
+                distribution[emotion] = count
+        
+        return distribution
+    
+    def _calculate_weekly_activity(self, sessions: List[Dict], memory_logs: List[Dict], 
+                                 week_ago: datetime, now: datetime) -> List[Dict[str, Any]]:
+        """Calculate daily activity for the past week."""
+        daily_activity = []
+        
+        for i in range(7):
+            day = now - timedelta(days=i)
+            day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = day_start + timedelta(days=1)
+            
+            # Count sessions for this day
+            day_sessions = [
+                s for s in sessions 
+                if day_start <= datetime.fromisoformat(s['created_at'].replace('Z', '+00:00')) < day_end
+            ]
+            
+            # Count messages for this day
+            day_messages = [
+                log for log in memory_logs 
+                if (day_start <= datetime.fromisoformat(log['timestamp'].replace('Z', '+00:00')) < day_end 
+                    and log.get('role') == 'user')
+            ]
+            
+            daily_activity.append({
+                "date": day.strftime("%Y-%m-%d"),
+                "day": day.strftime("%a"),
+                "sessions": len(day_sessions),
+                "messages": len(day_messages)
+            })
+        
+        return list(reversed(daily_activity))  # Return chronological order
+    
+    def _calculate_improvement_score(self, sessions: List[Dict], crisis_events: List[Dict], 
+                                   now: datetime, month_ago: datetime) -> float:
+        """Calculate improvement score based on various factors (0-10 scale)."""
+        if not sessions:
+            return 5.0  # Neutral score for new users
+        
+        score = 5.0  # Start with neutral
+        
+        # Factor 1: Session consistency (0-2 points)
+        recent_sessions = [
+            s for s in sessions 
+            if datetime.fromisoformat(s['created_at'].replace('Z', '+00:00')) >= month_ago
+        ]
+        
+        if len(recent_sessions) >= 20:  # Very active
+            score += 2.0
+        elif len(recent_sessions) >= 10:  # Active
+            score += 1.5
+        elif len(recent_sessions) >= 5:  # Moderately active
+            score += 1.0
+        elif len(recent_sessions) >= 1:  # Some activity
+            score += 0.5
+        
+        # Factor 2: Crisis level trends (0-2 points)
+        recent_crisis_events = [
+            e for e in crisis_events 
+            if datetime.fromisoformat(e['created_at'].replace('Z', '+00:00')) >= month_ago
+        ]
+        
+        if len(recent_crisis_events) == 0:  # No recent crises
+            score += 2.0
+        elif len(recent_crisis_events) <= 2:  # Few crises
+            score += 1.0
+        elif len(recent_crisis_events) <= 5:  # Moderate crises
+            score += 0.5
+        # No points added for many crises
+        
+        # Factor 3: Resolution rate of crisis events (0-1 point)
+        resolved_crises = [e for e in recent_crisis_events if e.get('resolved', False)]
+        if recent_crisis_events:
+            resolution_rate = len(resolved_crises) / len(recent_crisis_events)
+            score += resolution_rate  # 0-1 point based on resolution rate
+        
+        # Factor 4: Engagement trend (0-1 point)
+        if len(sessions) >= 2:
+            # Compare first half vs second half of sessions
+            mid_point = len(sessions) // 2
+            early_sessions = sessions[mid_point:]  # Older sessions (reversed order)
+            late_sessions = sessions[:mid_point]   # Recent sessions
+            
+            if len(late_sessions) > len(early_sessions):
+                score += 1.0  # Increasing engagement
+            elif len(late_sessions) == len(early_sessions):
+                score += 0.5  # Stable engagement
+        
+        # Ensure score is within 0-10 range
+        return max(0.0, min(10.0, round(score, 1)))
+    
+    def _calculate_avg_session_duration(self, memory_logs: List[Dict]) -> float:
+        """Calculate average session duration in minutes from memory logs."""
+        if not memory_logs:
+            return 0.0
+        
+        # Group logs by session_id
+        sessions_data = {}
+        for log in memory_logs:
+            session_id = log.get('session_id')
+            if not session_id:
+                continue
+            
+            timestamp = datetime.fromisoformat(log['timestamp'].replace('Z', '+00:00'))
+            
+            if session_id not in sessions_data:
+                sessions_data[session_id] = {'start': timestamp, 'end': timestamp}
+            else:
+                if timestamp < sessions_data[session_id]['start']:
+                    sessions_data[session_id]['start'] = timestamp
+                if timestamp > sessions_data[session_id]['end']:
+                    sessions_data[session_id]['end'] = timestamp
+        
+        # Calculate duration for each session
+        durations = []
+        for session_data in sessions_data.values():
+            duration = (session_data['end'] - session_data['start']).total_seconds() / 60  # minutes
+            if duration > 0:  # Only count sessions with actual duration
+                durations.append(duration)
+        
+        return round(sum(durations) / len(durations), 1) if durations else 0.0
     
     @timing_decorator("user_delete_account")
     async def delete_user_account(self, user_id: str) -> APIResponse[None]:

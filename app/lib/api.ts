@@ -411,7 +411,7 @@ class ApiClient {
         const messages = mockChatHistory.map((msg, index) => ({
           id: `demo-msg-${index}`,
           session_id: sessionId,
-          role: msg.sender === "user" ? "user" : "assistant",
+          role: (msg.sender === "user" ? "user" : "assistant") as "user" | "assistant",
           content: msg.message,
           created_at: msg.timestamp,
         }))

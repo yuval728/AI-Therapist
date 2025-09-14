@@ -29,7 +29,8 @@ def main():
         log_level=settings.logging.level.lower(),
         access_log=True,
         use_colors=True,
-        loop="asyncio"
+        loop="asyncio",
+        workers=4,
     )
 
 if __name__ == "__main__":
