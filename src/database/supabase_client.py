@@ -1,10 +1,8 @@
-"""Enhanced Supabase client with comprehensive integration for AI therapist."""
+"""Simple and efficient Supabase client for AI therapist."""
 import os
 from typing import Dict, List, Optional, Any
-from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 import asyncio
-from contextlib import asynccontextmanager
 
 from supabase import create_client, Client
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
@@ -16,84 +14,46 @@ from src.models import TherapySession, CrisisLevel, EmotionType, MessageType
 from src.utils import log_event, timing_decorator
 
 
-@dataclass
-class DatabaseConfig:
-    """Database configuration settings."""
-    url: str
-    key: str
-    service_role_key: Optional[str] = None
-    max_connections: int = 10
-    timeout: int = 30
-
-
-@dataclass
-class QueryResult:
-    """Structured query result."""
-    data: List[Dict[str, Any]]
-    count: Optional[int] = None
-    error: Optional[str] = None
-    success: bool = True
-
-
 class SupabaseClient:
-    """Enhanced Supabase client with comprehensive therapy app integration."""
+    """Simple and efficient Supabase client for therapy app integration."""
     
-    def __init__(self, config: Optional[DatabaseConfig] = None):
+    def __init__(self):
         self.settings = get_settings()
-        self.config = config or self._load_config()
         self.client: Optional[Client] = None
         self.vector_store: Optional[SupabaseVectorStore] = None
         self.embeddings: Optional[GoogleGenerativeAIEmbeddings] = None
         self._initialized = False
     
-    def _load_config(self) -> DatabaseConfig:
-        """Load database configuration from settings and environment."""
-        url = os.getenv("SUPABASE_URL") or self.settings.database.supabase_url
-        key = os.getenv("SUPABASE_KEY") or self.settings.database.supabase_key
-        service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        
-        if not url or not key:
-            raise ValueError("Supabase URL and key must be configured")
-        
-        return DatabaseConfig(
-            url=url,
-            key=key,
-            service_role_key=service_role_key,
-            max_connections=self.settings.database.max_connections,
-            timeout=self.settings.database.timeout
-        )
-    
     async def initialize(self) -> bool:
         """Initialize Supabase client and vector store."""
         try:
-            effective_key = self.config.service_role_key or self.config.key
-            self.client = create_client(self.config.url, effective_key)
+            # Load configuration
+            url = os.getenv("SUPABASE_URL") or self.settings.database.supabase_url
+            key = os.getenv("SUPABASE_KEY") or self.settings.database.supabase_key
+            service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
             
-            # Initialize embeddings and vector store if Google API key is available
-            self._initialize_vector_store()
+            if not url or not key:
+                raise ValueError("Supabase URL and key must be configured")
+            
+            # Initialize client
+            effective_key = service_role_key or key
+            self.client = create_client(url, effective_key)
+            
+            # Initialize vector store if Google API key is available
+            self._init_vector_store()
             
             self._initialized = True
-            
-            log_event(
-                event="supabase_client_initialized",
-                metadata={
-                    "url": self.config.url[:50] + "...",
-                    "using_service_role": bool(self.config.service_role_key),
-                    "vector_store_enabled": bool(self.vector_store)
-                }
-            )
-            
+            log_event(event="supabase_client_initialized", url=url[:50] + "...")
             return True
             
         except Exception as e:
             log_event(event="supabase_initialization_failed", error=str(e))
             return False
     
-    def _initialize_vector_store(self):
+    def _init_vector_store(self):
         """Initialize vector store components."""
         google_api_key = os.getenv("GOOGLE_API_KEY")
         if not google_api_key:
-            log_event(event="embeddings_not_configured", message="GOOGLE_API_KEY not set; vector features disabled")
             return
         
         try:
@@ -109,7 +69,6 @@ class SupabaseClient:
             )
         except Exception as e:
             log_event(event="embeddings_init_warning", error=str(e))
-
     
     def _ensure_initialized(self):
         """Ensure client is initialized."""
@@ -125,7 +84,7 @@ class SupabaseClient:
         full_name: str, 
         email: str,
         preferences: Optional[Dict] = None
-    ) -> QueryResult:
+    ) -> Optional[Dict[str, Any]]:
         """Create user profile."""
         self._ensure_initialized()
         
@@ -138,150 +97,30 @@ class SupabaseClient:
             }
             
             result = self.client.table("profiles").insert(data).execute()
-            return self._process_query_result(result, "user_profile_created", user_id=user_id, email=email)
+            if hasattr(result, 'error') and result.error:
+                log_event(event="user_profile_creation_failed", user_id=user_id, error=str(result.error))
+                return None
+            
+            log_event(event="user_profile_created", user_id=user_id, email=email)
+            return result.data[0] if result.data else None
             
         except Exception as e:
             log_event(event="user_profile_creation_failed", user_id=user_id, error=str(e))
-            return QueryResult(data=[], error=str(e), success=False)
+            return None
     
     @timing_decorator("get_user_profile")
-    async def get_user_profile(self, user_id: str) -> QueryResult:
+    async def get_user_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
         """Get user profile."""
         self._ensure_initialized()
         
         try:
             result = self.client.table("profiles").select("*").eq("id", user_id).execute()
-            return self._process_query_result(result)
+            if hasattr(result, 'error') and result.error:
+                return None
+            return result.data[0] if result.data else None
             
-        except Exception as e:
-            return QueryResult(data=[], error=str(e), success=False)
-    
-    @timing_decorator("get_memory_logs_keyset")
-    async def get_memory_logs_keyset(
-        self,
-        user_id: str,
-        session_id: str,
-        limit: int = 50,
-        order: str = "asc",
-        after_created_at: Optional[str] = None,
-        before_created_at: Optional[str] = None,
-    ) -> QueryResult:
-        """Get memory logs using keyset pagination over created_at.
-
-        Args:
-            user_id: The user id.
-            session_id: Session filter.
-            limit: Number of items to fetch.
-            order: 'asc' or 'desc'.
-            after_created_at: For forward pagination (created_at strictly greater than this).
-            before_created_at: For backward pagination (created_at strictly less than this).
-        """
-        self._ensure_initialized()
-        try:
-            q = (
-                self.client.table("memory_logs")
-                .select("*")
-                .eq("user_id", user_id)
-                .eq("session_id", session_id)
-            )
-
-            desc_flag = False if str(order).lower() == "asc" else True
-
-            # Apply cursor filters
-            if after_created_at and not before_created_at:
-                q = q.gt("created_at", after_created_at)
-            if before_created_at and not after_created_at:
-                q = q.lt("created_at", before_created_at)
-
-            # Stable ordering by created_at with tie-breaker id if available
-            q = q.order("created_at", desc=desc_flag).order("id", desc=desc_flag)
-
-            # Use limit (no offset)
-            q = q.limit(limit)
-
-            result = q.execute()
-            return self._process_query_result(result)
-        except Exception as e:
-            return QueryResult(data=[], error=str(e), success=False)
-    
-
-    def _process_query_result(self, result, success_event: Optional[str] = None, **event_data) -> QueryResult:
-        """Process Supabase query result consistently."""
-        if getattr(result, "error", None):
-            return QueryResult(data=[], error=str(result.error), success=False)
-        
-        if success_event:
-            log_event(event=success_event, **event_data)
-        
-        return QueryResult(data=result.data, success=True, error=None)
-    
-    @timing_decorator("create_therapy_session")
-    async def create_therapy_session(self, session: TherapySession) -> QueryResult:
-        """Create therapy session record."""
-        self._ensure_initialized()
-        
-        try:
-            data = self._prepare_session_data(session)
-            result = self.client.table("therapy_sessions").insert(data).execute()
-            return self._process_query_result(
-                result, "therapy_session_created", 
-                user_id=session.user_id, session_id=session.id
-            )
-            
-        except Exception as e:
-            log_event(event="therapy_session_creation_failed", user_id=session.user_id, error=str(e))
-            return QueryResult(data=[], error=str(e), success=False)
-    
-    def _prepare_session_data(self, session: TherapySession) -> Dict[str, Any]:
-        """Prepare session data for database insertion."""
-        return {
-            "user_id": session.user_id,
-            "session_id": session.id,
-            "emotion": session.emotion_detected.value if session.emotion_detected else None,
-            "crisis_level": (
-                session.crisis_level.value 
-                if session.crisis_level and session.crisis_level.value != "none" 
-                else None
-            ),
-            "processing_status": (
-                session.processing_status.value 
-                if getattr(session, "processing_status", None) 
-                else "pending"
-            ),
-            "session_summary": session.summary,
-            "metadata": session.metadata,
-        }
-    
-    @timing_decorator("update_therapy_session")
-    async def update_therapy_session(
-        self, 
-        user_id: str, 
-        session_id: str, 
-        updates: Dict[str, Any]
-    ) -> QueryResult:
-        """Update therapy session."""
-        self._ensure_initialized()
-        
-        try:
-            result = (
-                self.client.table("therapy_sessions")
-                .update(updates)
-                .eq("user_id", user_id)
-                .eq("session_id", session_id)
-                .execute()
-            )
-            
-            return self._process_query_result(
-                result, "therapy_session_updated",
-                user_id=user_id, session_id=session_id, updates=list(updates.keys())
-            )
-            
-        except Exception as e:
-            log_event(
-                event="therapy_session_update_failed",
-                user_id=user_id, session_id=session_id, error=str(e)
-            )
-            return QueryResult(data=[], error=str(e), success=False)
+        except Exception:
+            return None
     
     # === Memory Management ===
     
@@ -296,7 +135,7 @@ class SupabaseClient:
         emotion: Optional[EmotionType] = None,
         crisis_level: Optional[CrisisLevel] = None,
         metadata: Optional[Dict] = None
-    ) -> QueryResult:
+    ) -> bool:
         """Save memory log entry."""
         self._ensure_initialized()
         
@@ -315,16 +154,11 @@ class SupabaseClient:
             }
             
             result = self.client.table("memory_logs").insert(data).execute()
-            return self._process_query_result(result)
+            return not (hasattr(result, 'error') and result.error)
             
         except Exception as e:
-            log_event(
-                event="memory_log_save_failed",
-                user_id=user_id,
-                session_id=session_id,
-                error=str(e)
-            )
-            return QueryResult(data=[], error=str(e), success=False)
+            log_event(event="memory_log_save_failed", user_id=user_id, session_id=session_id, error=str(e))
+            return False
 
     @timing_decorator("get_memory_logs")
     async def get_memory_logs(
@@ -334,16 +168,8 @@ class SupabaseClient:
         limit: int = 10,
         offset: int = 0,
         order: str = "desc",
-    ) -> QueryResult:
-        """Get memory logs for a user/session with pagination.
-
-        Args:
-            user_id: The user id.
-            session_id: Filter by session id.
-            limit: Page size.
-            offset: Zero-based offset for pagination.
-            order: 'asc' or 'desc' by timestamp.
-        """
+    ) -> List[Dict[str, Any]]:
+        """Get memory logs for a user/session with pagination."""
         self._ensure_initialized()
         
         try:
@@ -352,18 +178,129 @@ class SupabaseClient:
             if session_id:
                 query = query.eq("session_id", session_id)
             
-            desc_flag = False if str(order).lower() == "asc" else True
-            # Use range for offset pagination and stable ordering by timestamp
+            desc_flag = order.lower() != "asc"
             result = (
                 query
                 .order("timestamp", desc=desc_flag)
                 .range(offset, offset + limit - 1)
                 .execute()
             )
-            return self._process_query_result(result)
+            
+            if hasattr(result, 'error') and result.error:
+                return []
+            return result.data or []
+            
+        except Exception:
+            return []
+    
+    @timing_decorator("get_memory_logs_keyset")
+    async def get_memory_logs_keyset(
+        self,
+        user_id: str,
+        session_id: str,
+        limit: int = 50,
+        order: str = "asc",
+        after_created_at: Optional[str] = None,
+        before_created_at: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get memory logs using keyset pagination over created_at."""
+        self._ensure_initialized()
+        
+        try:
+            q = (
+                self.client.table("memory_logs")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("session_id", session_id)
+            )
+
+            desc_flag = order.lower() != "asc"
+
+            # Apply cursor filters
+            if after_created_at and not before_created_at:
+                q = q.gt("created_at", after_created_at)
+            if before_created_at and not after_created_at:
+                q = q.lt("created_at", before_created_at)
+
+            # Stable ordering by created_at with tie-breaker id if available
+            q = q.order("created_at", desc=desc_flag).order("id", desc=desc_flag).limit(limit)
+
+            result = q.execute()
+            if hasattr(result, 'error') and result.error:
+                return []
+            return result.data or []
+            
+        except Exception:
+            return []
+    
+    # === Therapy Session Management ===
+    
+    @timing_decorator("create_therapy_session")
+    async def create_therapy_session(self, session: TherapySession) -> bool:
+        """Create therapy session record."""
+        self._ensure_initialized()
+        
+        try:
+            data = {
+                "user_id": session.user_id,
+                "session_id": session.id,
+                "emotion": session.emotion_detected.value if session.emotion_detected else None,
+                "crisis_level": (
+                    session.crisis_level.value 
+                    if session.crisis_level and session.crisis_level.value != "none" 
+                    else None
+                ),
+                "processing_status": (
+                    session.processing_status.value 
+                    if getattr(session, "processing_status", None) 
+                    else "pending"
+                ),
+                "session_summary": session.summary,
+                "metadata": session.metadata,
+            }
+            
+            result = self.client.table("therapy_sessions").insert(data).execute()
+            success = not (hasattr(result, 'error') and result.error)
+            
+            if success:
+                log_event(event="therapy_session_created", user_id=session.user_id, session_id=session.id)
+            else:
+                log_event(event="therapy_session_creation_failed", user_id=session.user_id, error=str(result.error))
+            
+            return success
             
         except Exception as e:
-            return QueryResult(data=[], error=str(e), success=False)
+            log_event(event="therapy_session_creation_failed", user_id=session.user_id, error=str(e))
+            return False
+    
+    @timing_decorator("update_therapy_session")
+    async def update_therapy_session(
+        self, 
+        user_id: str, 
+        session_id: str, 
+        updates: Dict[str, Any]
+    ) -> bool:
+        """Update therapy session."""
+        self._ensure_initialized()
+        
+        try:
+            result = (
+                self.client.table("therapy_sessions")
+                .update(updates)
+                .eq("user_id", user_id)
+                .eq("session_id", session_id)
+                .execute()
+            )
+            
+            success = not (hasattr(result, 'error') and result.error)
+            if success:
+                log_event(event="therapy_session_updated", user_id=user_id, session_id=session_id)
+            
+            return success
+            
+        except Exception as e:
+            log_event(event="therapy_session_update_failed", user_id=user_id, session_id=session_id, error=str(e))
+            return False
     
     # === Vector Store Operations ===
     
@@ -379,7 +316,6 @@ class SupabaseClient:
         self._ensure_initialized()
         
         if not self.vector_store:
-            log_event(event="vector_store_not_available", user_id=user_id)
             return False
         
         try:
@@ -387,16 +323,14 @@ class SupabaseClient:
                 "user_id": user_id,
                 "content_type": content_type,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "metadata": metadata or {}
             }
+            if metadata:
+                full_metadata.update(metadata)
             
             document = Document(page_content=content, metadata=full_metadata)
             await asyncio.to_thread(self.vector_store.add_documents, [document])
             
-            log_event(
-                event="vector_store_save_success",
-                user_id=user_id, content_type=content_type, metadata=metadata
-            )
+            log_event(event="vector_store_save_success", user_id=user_id, content_type=content_type)
             return True
             
         except Exception as e:
@@ -415,63 +349,43 @@ class SupabaseClient:
         self._ensure_initialized()
         
         if not self.vector_store or not self.embeddings:
-            log_event(event="vector_search_not_available", user_id=user_id)
             return []
         
         try:
             embedding = await asyncio.to_thread(self.embeddings.embed_query, query)
-            result = self._execute_vector_search(user_id, embedding, k, threshold)
             
-            if not result:
+            # Try enhanced RPC function first
+            result = self.client.rpc(
+                "match_documents",
+                {
+                    "user_id_param": user_id,
+                    "query_embedding": embedding,
+                    "match_threshold": threshold,
+                    "match_count": k
+                }
+            ).execute()
+            
+            # Fallback to simple RPC if enhanced version fails
+            if hasattr(result, 'error') and result.error:
+                result = self.client.rpc(
+                    "match_documents",
+                    {"user_id": user_id, "query_embedding": embedding, "match_count": k}
+                ).execute()
+            
+            if hasattr(result, 'error') and result.error:
                 return []
             
             documents = [
                 Document(page_content=row["content"], metadata=row["metadata"])
-                for row in result.data
+                for row in result.data or []
             ]
             
-            log_event(
-                event="vector_search_completed",
-                user_id=user_id, query_length=len(query), results_found=len(documents)
-            )
+            log_event(event="vector_search_completed", user_id=user_id, results_found=len(documents))
             return documents
             
         except Exception as e:
             log_event(event="vector_search_failed", user_id=user_id, error=str(e))
             return []
-    
-    def _execute_vector_search(self, user_id: str, embedding: List[float], k: int, threshold: float):
-        """Execute vector search with fallback for different RPC signatures."""
-        # Try enhanced RPC function first
-        result = self.client.rpc(
-            "match_documents",
-            {
-                "user_id_param": user_id,
-                "query_embedding": embedding,
-                "match_threshold": threshold,
-                "match_count": k
-            }
-        ).execute()
-        
-        if getattr(result, "error", None):
-            error_str = str(result.error)
-            if "Could not find the function" in error_str and "match_documents" in error_str:
-                # Try legacy function signature
-                fallback = self.client.rpc(
-                    "match_documents",
-                    {"user_id": user_id, "query_embedding": embedding, "match_count": k}
-                ).execute()
-                
-                if not getattr(fallback, "error", None):
-                    return fallback
-                
-                log_event(event="vector_search_failed", user_id=user_id, error=str(fallback.error))
-                return None
-            else:
-                log_event(event="vector_search_failed", user_id=user_id, error=error_str)
-                return None
-        
-        return result
     
     # === Crisis Management ===
     
@@ -485,7 +399,7 @@ class SupabaseClient:
         escalation_needed: bool = False,
         response_provided: Optional[str] = None,
         metadata: Optional[Dict] = None
-    ) -> QueryResult:
+    ) -> bool:
         """Log crisis event."""
         self._ensure_initialized()
         
@@ -501,22 +415,25 @@ class SupabaseClient:
             }
             
             result = self.client.table("crisis_events").insert(data).execute()
-            return self._process_query_result(
-                result, "crisis_event_logged",
-                user_id=user_id, session_id=session_id, 
-                crisis_level=crisis_level.value, escalation_needed=escalation_needed
-            )
+            success = not (hasattr(result, 'error') and result.error)
+            
+            if success:
+                log_event(
+                    event="crisis_event_logged",
+                    user_id=user_id, 
+                    session_id=session_id, 
+                    crisis_level=crisis_level.value,
+                    escalation_needed=escalation_needed
+                )
+            
+            return success
             
         except Exception as e:
-            log_event(
-                event="crisis_event_logging_failed",
-                user_id=user_id, session_id=session_id, error=str(e)
-            )
-            return QueryResult(data=[], error=str(e), success=False)
+            log_event(event="crisis_event_logging_failed", user_id=user_id, session_id=session_id, error=str(e))
+            return False
     
     # === Security and Performance Logging ===
     
-    @timing_decorator("log_security_event")
     async def log_security_event(
         self,
         event_type: str,
@@ -538,12 +455,11 @@ class SupabaseClient:
             }
             
             result = self.client.table("security_events").insert(data).execute()
-            return not getattr(result, "error", None)
+            return not (hasattr(result, 'error') and result.error)
             
         except Exception:
             return False
     
-    @timing_decorator("log_performance_metric")
     async def log_performance_metric(
         self,
         operation: str,
@@ -565,7 +481,7 @@ class SupabaseClient:
             }
             
             result = self.client.table("performance_metrics").insert(data).execute()
-            return not getattr(result, "error", None)
+            return not (hasattr(result, 'error') and result.error)
             
         except Exception:
             return False
@@ -601,12 +517,26 @@ class SupabaseClient:
     
     async def close(self):
         """Close client connections."""
-        if self.client:
-            # Supabase client doesn't have explicit close method
-            self.client = None
+        # Supabase handles connection cleanup automatically
+        # Just reset our internal state
+        self.client = None
         self.vector_store = None
         self.embeddings = None
         self._initialized = False
+        log_event(event="supabase_client_closed")
+    
+    def get_connection_info(self) -> Dict[str, Any]:
+        """Get connection information for monitoring."""
+        if not self._initialized or not self.client:
+            return {"status": "disconnected"}
+        
+        return {
+            "status": "connected",
+            "pooling": "managed_by_supabase",
+            "client_type": "supabase-py",
+            "vector_store_enabled": self.vector_store is not None,
+            "embeddings_enabled": self.embeddings is not None
+        }
 
 
 # Global client instance
@@ -622,14 +552,3 @@ async def get_supabase_client() -> SupabaseClient:
         await _supabase_client.initialize()
     
     return _supabase_client
-
-
-@asynccontextmanager
-async def supabase_session():
-    """Context manager for Supabase operations."""
-    client = await get_supabase_client()
-    try:
-        yield client
-    finally:
-        # Cleanup if needed
-        pass

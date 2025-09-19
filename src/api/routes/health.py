@@ -1,166 +1,109 @@
-"""Health check and system status API routes."""
-from typing import Dict, Any
-from fastapi import APIRouter, status
+"""Simple and efficient health check API routes."""
+from fastapi import APIRouter
 from datetime import datetime, timezone
-import asyncio
+from typing import Dict, Any
 
-from src.database import get_supabase_client
+from src.database.supabase_client import get_supabase_client
 from src.models import APIResponse
 from src.config import get_settings
-from src.utils import log_therapy_event
+from src.utils import log_event
 
 router = APIRouter(prefix="/health", tags=["health"])
 
 
 @router.get("/")
-async def health_check() -> APIResponse[Dict[str, Any]]:
-    """Basic health check endpoint."""
-    return APIResponse(
-        success=True,
-        data={
-            "status": "healthy",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "service": "AI Therapist API"
-        },
-        message="Service is running"
-    )
-
-
-@router.get("/detailed")
-async def detailed_health_check() -> APIResponse[Dict[str, Any]]:
-    """Detailed health check with dependency status."""
-    health_data = {
-        "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "service": "AI Therapist API",
-        "version": get_settings().version,
-        "environment": get_settings().environment,
-        "dependencies": {}
-    }
-    
-    # Check database connection
+async def health_check() -> Dict[str, Any]:
+    """Basic health check - is the service alive and database connected?"""
     try:
+        # Quick database connectivity test
         supabase_client = await get_supabase_client()
-        # Simple query to test connection
-        result = supabase_client.client.table("profiles").select("count", count="exact").limit(1).execute()
-        health_data["dependencies"]["database"] = {
+        if not supabase_client._initialized:
+            return {
+                "status": "unhealthy",
+                "reason": "database_disconnected",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        
+        return {
             "status": "healthy",
-            "response_time_ms": 0  # Could add timing here
+            "service": "AI Therapist API",
+            "version": get_settings().version,
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
+        
     except Exception as e:
-        health_data["dependencies"]["database"] = {
+        log_event(event="health_check_failed", error=str(e))
+        return {
             "status": "unhealthy",
-            "error": str(e)
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
-        health_data["status"] = "degraded"
+
+
+@router.get("/ready")
+async def readiness_check() -> Dict[str, Any]:
+    """Kubernetes-style readiness probe."""
+    health_result = await health_check()
     
-    # Check configuration
-    settings = get_settings()
-    config_issues = []
+    # Ready if healthy
+    is_ready = health_result.get("status") == "healthy"
     
-    if not settings.models.google_api_key:
-        config_issues.append("Missing Google API key")
-    if not settings.database.supabase_url:
-        config_issues.append("Missing Supabase URL")
-    if not settings.database.supabase_key:
-        config_issues.append("Missing Supabase key")
-    
-    health_data["dependencies"]["configuration"] = {
-        "status": "healthy" if not config_issues else "unhealthy",
-        "issues": config_issues
+    return {
+        "ready": is_ready,
+        "status": health_result.get("status", "unknown"),
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
-    
-    if config_issues:
-        health_data["status"] = "degraded"
-    
-    return APIResponse(
-        success=True,
-        data=health_data
-    )
+
+
+@router.get("/live")
+async def liveness_check() -> Dict[str, Any]:
+    """Kubernetes-style liveness probe - just verify service is responding."""
+    return {
+        "alive": True,
+        "service": "AI Therapist API",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
 
 
 @router.get("/metrics")
-async def get_metrics() -> APIResponse[Dict[str, Any]]:
-    """Get basic system metrics."""
+async def get_basic_metrics() -> APIResponse[Dict[str, Any]]:
+    """Get basic application metrics."""
     try:
         supabase_client = await get_supabase_client()
         
-        # Get basic counts
-        users_result = supabase_client.client.table("profiles").select("count", count="exact").execute()
-        sessions_result = supabase_client.client.table("therapy_sessions").select("count", count="exact").execute()
-        messages_result = supabase_client.client.table("memory_logs").select("count", count="exact").execute()
-        
+        # Get basic counts if database is available
         metrics = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "users": {
-                "total": users_result.count if users_result else 0
-            },
-            "sessions": {
-                "total": sessions_result.count if sessions_result else 0
-            },
-            "messages": {
-                "total": messages_result.count if messages_result else 0
-            },
-            "system": {
-                "uptime_seconds": 0,  # Could track actual uptime
-                "environment": get_settings().environment
-            }
+            "environment": get_settings().environment,
+            "version": get_settings().version
         }
+        
+        if supabase_client._initialized:
+            try:
+                # Get basic counts
+                users_result = supabase_client.client.table("profiles").select("count", count="exact").execute()
+                sessions_result = supabase_client.client.table("therapy_sessions").select("count", count="exact").execute()
+                
+                metrics.update({
+                    "users_count": users_result.count if users_result and hasattr(users_result, 'count') else 0,
+                    "sessions_count": sessions_result.count if sessions_result and hasattr(sessions_result, 'count') else 0,
+                    "database_status": "connected"
+                })
+            except Exception:
+                metrics["database_status"] = "error"
+        else:
+            metrics["database_status"] = "disconnected"
         
         return APIResponse(
             success=True,
-            data=metrics
+            data=metrics,
+            message="Basic metrics retrieved successfully"
         )
         
     except Exception as e:
-        log_therapy_event(
-            event="metrics_error",
-            error=str(e)
-        )
+        log_event(event="metrics_failed", error=str(e))
         return APIResponse(
             success=False,
             error="Failed to retrieve metrics",
             error_code="METRICS_ERROR"
         )
-
-
-@router.get("/readiness")
-async def readiness_check() -> APIResponse[Dict[str, Any]]:
-    """Readiness check for container orchestration."""
-    try:
-        # Check if all critical services are ready
-        supabase_client = await get_supabase_client()
-        
-        # Test database connectivity
-        result = supabase_client.client.table("profiles").select("count", count="exact").limit(1).execute()
-        
-        return APIResponse(
-            success=True,
-            data={
-                "status": "ready",
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-        )
-        
-    except Exception as e:
-        return APIResponse(
-            success=False,
-            data={
-                "status": "not_ready",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "error": str(e)
-            },
-            error="Service not ready"
-        )
-
-
-@router.get("/liveness")
-async def liveness_check() -> APIResponse[Dict[str, Any]]:
-    """Liveness check for container orchestration."""
-    return APIResponse(
-        success=True,
-        data={
-            "status": "alive",
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-    )

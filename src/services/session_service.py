@@ -1,26 +1,49 @@
 """Session management service layer."""
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
-import uuid
+import logging
 
 from src.database import get_supabase_client
 from src.models import (
     TherapySession, SessionMessage, EmotionType, CrisisLevel,
-    MessageType, APIResponse, PaginationParams, ProcessingStatus
+    APIResponse, PaginationParams, ProcessingStatus
 )
 from src.utils import log_therapy_event, timing_decorator
 
+# Configure logger for this module
+logger = logging.getLogger(__name__)
 
 class SessionService:
-    """Business logic for therapy session management."""
+    """Optimized business logic for therapy session management."""
     
     def __init__(self):
         self.supabase_client = None
+        self._cache = {}  # Simple in-memory cache
+        self._cache_ttl = 300  # 5 minutes
     
     async def _ensure_initialized(self):
         """Ensure database client is initialized."""
         if self.supabase_client is None:
             self.supabase_client = await get_supabase_client()
+    
+    def _is_cache_valid(self, key: str) -> bool:
+        """Check if cache entry is still valid."""
+        if key not in self._cache:
+            return False
+        return (datetime.now(timezone.utc) - self._cache[key]['timestamp']).total_seconds() < self._cache_ttl
+    
+    def _get_from_cache(self, key: str) -> Any:
+        """Get value from cache if valid."""
+        if self._is_cache_valid(key):
+            return self._cache[key]['data']
+        return None
+    
+    def _set_cache(self, key: str, data: Any):
+        """Set value in cache with timestamp."""
+        self._cache[key] = {
+            'data': data,
+            'timestamp': datetime.now(timezone.utc)
+        }
     
     @timing_decorator("session_create")
     async def create_session(
@@ -30,39 +53,39 @@ class SessionService:
         crisis_level: Optional[CrisisLevel] = None,
         metadata: Optional[Dict[str, Any]] = None
     ) -> APIResponse[TherapySession]:
-        """Create a new therapy session."""
+        """Create a new therapy session with improved efficiency."""
         await self._ensure_initialized()
         
         try:
-            # Idempotency: return the most recent session if it was just created
-            # within a short window to avoid duplicates from rapid repeated calls.
-            idempotency_window_seconds = 45
-            cutoff = datetime.now(timezone.utc) - timedelta(seconds=idempotency_window_seconds)
-            try:
-                recent = (
+            # Check for recent sessions to avoid duplicates (optimized query)
+            cache_key = f"recent_session_{user_id}"
+            recent_session = self._get_from_cache(cache_key)
+            
+            if not recent_session:
+                # Only query DB if not in cache
+                cutoff = datetime.now(timezone.utc) - timedelta(seconds=45)
+                result = (
                     self.supabase_client.client.table("therapy_sessions")
-                    .select("*")
+                    .select("id,user_id,created_at,emotion_detected,crisis_level,metadata")
                     .eq("user_id", user_id)
                     .gte("created_at", cutoff.isoformat())
                     .order("created_at", desc=True)
                     .limit(1)
                     .execute()
                 )
-                if recent and getattr(recent, "data", None):
-                    existing = self._build_session_from_data(recent.data[0])
-                    log_therapy_event(
-                        event="session_idempotent_return",
-                        user_id=user_id, session_id=existing.id,
-                        metadata={"window_seconds": idempotency_window_seconds}
-                    )
+                
+                if result.data:
+                    recent_session = self._build_session_from_data(result.data[0])
+                    self._set_cache(cache_key, recent_session)
+                    
+                    logger.info(f"Returning recent session for user {user_id}")
                     return APIResponse(
-                        success=True, data=existing,
+                        success=True, 
+                        data=recent_session,
                         message="Existing recent session returned"
                     )
-            except Exception:
-                # Non-fatal: fall back to creating a new session if the lookup fails
-                pass
 
+            # Create new session
             session = TherapySession(
                 user_id=user_id,
                 emotion_detected=emotion or EmotionType.NEUTRAL,
@@ -73,17 +96,15 @@ class SessionService:
             result = await self.supabase_client.create_therapy_session(session)
             
             if not result.success:
-                # Log reason from DB for easier debugging
-                log_therapy_event(
-                    event="session_creation_failed",
-                    user_id=user_id,
-                    error=result.error or "unknown_error"
-                )
+                logger.error(f"Failed to create session for user {user_id}: {result.error}")
                 return APIResponse(
                     success=False,
                     error="Failed to create therapy session",
                     error_code="SESSION_CREATE_FAILED"
                 )
+            
+            # Cache the new session
+            self._set_cache(cache_key, session)
             
             log_therapy_event(
                 event="session_created",
@@ -97,12 +118,8 @@ class SessionService:
                 message="Therapy session created successfully"
             )
             
-        except Exception as e:
-            log_therapy_event(
-                event="session_create_error",
-                user_id=user_id,
-                error=str(e)
-            )
+        except Exception:
+            logger.exception(f"Error creating session for user {user_id}")
             return APIResponse(
                 success=False,
                 error="Failed to create therapy session",
@@ -111,14 +128,22 @@ class SessionService:
     
     @timing_decorator("session_get")
     async def get_session(self, user_id: str, session_id: str) -> APIResponse[TherapySession]:
-        """Get therapy session by ID."""
+        """Get therapy session by ID with caching."""
         await self._ensure_initialized()
         
         try:
+            # Check cache first
+            cache_key = f"session_{session_id}"
+            cached_session = self._get_from_cache(cache_key)
+            if cached_session:
+                return APIResponse(success=True, data=cached_session)
+            
+            # Query database with only needed fields for better performance
             result = self.supabase_client.client.table("therapy_sessions")\
-                .select("*")\
+                .select("id,user_id,created_at,emotion_detected,crisis_level,processing_status,session_summary,metadata,ended_at")\
                 .eq("user_id", user_id)\
-                .eq("session_id", session_id)\
+                .eq("id", session_id)\
+                .single()\
                 .execute()
             
             if not result.data:
@@ -128,20 +153,15 @@ class SessionService:
                     error_code="SESSION_NOT_FOUND"
                 )
             
-            session = self._build_session_from_data(result.data[0])
+            session = self._build_session_from_data(result.data)
             
-            return APIResponse(
-                success=True,
-                data=session
-            )
+            # Cache the result
+            self._set_cache(cache_key, session)
             
-        except Exception as e:
-            log_therapy_event(
-                event="session_get_error",
-                user_id=user_id,
-                session_id=session_id,
-                error=str(e)
-            )
+            return APIResponse(success=True, data=session)
+            
+        except Exception:
+            logger.exception(f"Error retrieving session {session_id} for user {user_id}")
             return APIResponse(
                 success=False,
                 error="Failed to retrieve session",
@@ -290,13 +310,25 @@ class SessionService:
         before_created_at: Optional[str] = None,
         order: str = "asc"
     ) -> APIResponse[List[SessionMessage]]:
-        """Get messages for a therapy session."""
+        """Get messages for a therapy session with optimized caching."""
         await self._ensure_initialized()
         
         try:
             pagination = pagination or PaginationParams()
+            
+            # Create cache key based on parameters
+            cache_key = f"messages_{session_id}_{order}_{pagination.limit}_{pagination.offset}"
+            if after_created_at:
+                cache_key += f"_after_{after_created_at}"
+            if before_created_at:
+                cache_key += f"_before_{before_created_at}"
+            
+            # Check cache for frequently accessed message lists
+            cached_messages = self._get_from_cache(cache_key)
+            if cached_messages and not after_created_at and not before_created_at:
+                return APIResponse(success=True, data=cached_messages)
 
-            # Prefer keyset pagination when cursor provided
+            # Use optimized query strategy
             if after_created_at or before_created_at:
                 result = await self.supabase_client.get_memory_logs_keyset(
                     user_id=user_id,
@@ -307,56 +339,54 @@ class SessionService:
                     before_created_at=before_created_at,
                 )
             else:
-                # Fallback to offset-based for initial loads
                 result = await self.supabase_client.get_memory_logs(
                     user_id=user_id,
                     session_id=session_id,
                     limit=pagination.limit,
                     offset=pagination.offset,
-                    order="asc",
+                    order=order,
                 )
 
             if not result.success:
+                logger.error(f"Failed to fetch messages for session {session_id}")
                 return APIResponse(
                     success=False,
                     error="Failed to retrieve session messages",
                     error_code="MESSAGES_FETCH_FAILED"
                 )
             
+            # Build messages efficiently
             messages = [self._build_message_from_data(data) for data in result.data]
             
-            # Build cursor metadata for client; avoid expensive count
-            next_after = messages[-1].timestamp.isoformat() if messages else None
-            prev_before = messages[0].timestamp.isoformat() if messages else None
-            has_more = bool(messages)  # client can probe using next cursor
-
+            # Cache result for future requests (only for standard queries)
+            if not after_created_at and not before_created_at:
+                self._set_cache(cache_key, messages)
+            
+            # Build efficient cursor metadata
+            metadata = {
+                "count": len(messages),
+                "order": order,
+                "has_more": len(messages) == pagination.limit
+            }
+            
+            if messages:
+                metadata["next_cursor"] = messages[-1].timestamp.isoformat()
+                metadata["prev_cursor"] = messages[0].timestamp.isoformat()
+            
             return APIResponse(
                 success=True,
                 data=messages,
-                metadata={
-                    "total": len(messages),
-                    "offset": pagination.offset,
-                    "limit": pagination.limit,
-                    "has_more": has_more,
-                    "order": order,
-                    "next_after": next_after,
-                    "prev_before": prev_before,
-                    "session_id": session_id,
-                }
+                metadata=metadata
             )
             
-        except Exception as e:
-            log_therapy_event(
-                event="session_messages_error",
-                user_id=user_id,
-                session_id=session_id,
-                error=str(e)
-            )
+        except Exception:
+            logger.exception(f"Error retrieving messages for session {session_id}")
             return APIResponse(
                 success=False,
                 error="Failed to retrieve session messages",
                 error_code="INTERNAL_ERROR"
             )
+
     
     @timing_decorator("session_add_message")
     async def add_session_message(
@@ -365,7 +395,7 @@ class SessionService:
         session_id: str,
         message: SessionMessage
     ) -> APIResponse[SessionMessage]:
-        """Add a message to a therapy session."""
+        """Add a message to a therapy session with cache invalidation."""
         await self._ensure_initialized()
         
         try:
@@ -380,11 +410,21 @@ class SessionService:
             )
             
             if not result.success:
+                logger.error(f"Failed to save message for session {session_id}")
                 return APIResponse(
                     success=False,
                     error="Failed to save message",
                     error_code="MESSAGE_SAVE_FAILED"
                 )
+            
+            # Invalidate relevant caches when new message is added
+            cache_keys_to_invalidate = [
+                f"messages_{session_id}_asc_{limit}_{offset}"
+                for limit in [10, 20, 50] for offset in [0, 10, 20]
+            ]
+            for key in cache_keys_to_invalidate:
+                if key in self._cache:
+                    del self._cache[key]
             
             return APIResponse(
                 success=True,
@@ -392,13 +432,8 @@ class SessionService:
                 message="Message added successfully"
             )
             
-        except Exception as e:
-            log_therapy_event(
-                event="session_add_message_error",
-                user_id=user_id,
-                session_id=session_id,
-                error=str(e)
-            )
+        except Exception:
+            logger.exception(f"Error adding message to session {session_id}")
             return APIResponse(
                 success=False,
                 error="Failed to add message",
@@ -502,13 +537,6 @@ class SessionService:
     
     def _build_message_from_data(self, msg_data: Dict[str, Any]) -> SessionMessage:
         """Build SessionMessage object from database data."""
-        # Prefer 'timestamp' column from memory_logs, fallback to 'created_at'
-        ts_raw = msg_data.get("timestamp") or msg_data.get("created_at")
-        ts = (
-            datetime.fromisoformat(str(ts_raw).replace('Z', '+00:00')) 
-            if ts_raw else datetime.now(timezone.utc)
-        )
-        
         # Normalize message_type to match SessionMessage.pattern('^(user|assistant|system)$')
         raw_type = str(msg_data.get("message_type") or msg_data.get("role") or "user").lower()
         if raw_type in {"user_input", "user"}:

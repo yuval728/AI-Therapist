@@ -1,5 +1,5 @@
 """Enhanced flow handlers with improved error handling and monitoring."""
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from langchain_core.messages import HumanMessage, AIMessage
 from src.therapy.memory.memory_manager import (
     get_memory_manager,
@@ -7,8 +7,10 @@ from src.therapy.memory.memory_manager import (
     save_to_long_term_memory,
 )
 from src.config.constants import ResponseMessages, ClassificationResults, SystemPrompts
-from src.models import AttackType, EmotionType, CrisisLevel, MessageType, ClassificationFormat
-from src.core import moderate_input, moderate_output, detect_pii_enhanced, chat_completion, classify_text
+from src.models import AttackType, EmotionType, CrisisLevel, ClassificationFormat
+from src.therapy.guardrails.input_moderation import moderate_input, moderate_output
+from src.therapy.guardrails.pii_detection import detect_pii_enhanced
+from src.therapy.llm_utils import classify_text
 from src.utils import log_therapy_event, timing_decorator
 import json
 

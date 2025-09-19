@@ -1,27 +1,48 @@
-"""Authentication API routes."""
+"""Authentication API routes with enhanced security integration."""
 from typing import Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 
 from src.models import (
-    SignInRequest, SignUpRequest, OAuthRequest, APIResponse, User
+    SignInRequest, SignUpRequest, OAuthRequest, APIResponse
 )
-from src.services import get_auth_service
-from src.api.middleware import get_current_user, get_optional_user
-from src.utils import log_therapy_event
+from src.services.auth_service import (
+    sign_up as service_sign_up, 
+    sign_in as service_sign_in, 
+    sign_out as service_sign_out, 
+    refresh_token as service_refresh_token,
+    reset_password as service_reset_password, 
+    oauth_sign_in as service_oauth_sign_in
+)
+from src.api.middleware import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
 
+def get_client_ip(request: Request) -> str:
+    """Extract client IP address from request."""
+    # Check for forwarded IP first (proxy/load balancer)
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    
+    # Check for real IP header
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip
+    
+    # Fall back to client host
+    return request.client.host if request.client else "unknown"
+
+
 @router.post("/signup")
-async def sign_up(request: SignUpRequest) -> APIResponse[User]:
+async def signup_endpoint(request: SignUpRequest, req: Request) -> APIResponse[Dict[str, Any]]:
     """Register a new user account.
     
     Creates a new user account with email verification.
     Returns user profile information upon successful registration.
     """
-    auth_service = await get_auth_service()
-    result = await auth_service.sign_up(request)
+    ip_address = get_client_ip(req)
+    result = await service_sign_up(request, ip_address)
     
     if not result.success:
         raise HTTPException(
@@ -33,13 +54,13 @@ async def sign_up(request: SignUpRequest) -> APIResponse[User]:
 
 
 @router.post("/signin")
-async def sign_in(request: SignInRequest) -> APIResponse[Dict[str, Any]]:
+async def signin_endpoint(request: SignInRequest, req: Request) -> APIResponse[Dict[str, Any]]:
     """Authenticate user and create session.
     
     Validates credentials and returns access tokens for authenticated requests.
     """
-    auth_service = await get_auth_service()
-    result = await auth_service.sign_in(request)
+    ip_address = get_client_ip(req)
+    result = await service_sign_in(request, ip_address)
     
     if not result.success:
         raise HTTPException(
@@ -51,13 +72,13 @@ async def sign_in(request: SignInRequest) -> APIResponse[Dict[str, Any]]:
 
 
 @router.post("/oauth")
-async def oauth_login(request: OAuthRequest) -> APIResponse[Dict[str, Any]]:
+async def oauth_login(request: OAuthRequest, req: Request) -> APIResponse[Dict[str, Any]]:
     """Initiate OAuth authentication flow.
     
     Returns OAuth provider URL for authentication redirect.
     """
-    auth_service = await get_auth_service()
-    result = await auth_service.oauth_sign_in(request)
+    ip_address = get_client_ip(req)
+    result = await service_oauth_sign_in(request, ip_address)
     
     if not result.success:
         raise HTTPException(
@@ -69,10 +90,9 @@ async def oauth_login(request: OAuthRequest) -> APIResponse[Dict[str, Any]]:
 
 
 @router.post("/signout")
-async def sign_out(current_user: Dict[str, Any] = Depends(get_current_user)) -> APIResponse[None]:
+async def signout_endpoint(current_user: Dict[str, Any] = Depends(get_current_user)) -> APIResponse[None]:
     """Sign out current user and invalidate session."""
-    auth_service = await get_auth_service()
-    result = await auth_service.sign_out(current_user["user"]["id"])
+    result = await service_sign_out(current_user["user"]["id"])
     
     if not result.success:
         raise HTTPException(
@@ -84,10 +104,9 @@ async def sign_out(current_user: Dict[str, Any] = Depends(get_current_user)) -> 
 
 
 @router.post("/refresh")
-async def refresh_token(refresh_token: str) -> APIResponse[Dict[str, Any]]:
+async def refresh_token_endpoint(refresh_token: str) -> APIResponse[Dict[str, Any]]:
     """Refresh access token using refresh token."""
-    auth_service = await get_auth_service()
-    result = await auth_service.refresh_token(refresh_token)
+    result = await service_refresh_token(refresh_token)
     
     if not result.success:
         raise HTTPException(
@@ -109,10 +128,9 @@ async def get_current_user_info(current_user: Dict[str, Any] = Depends(get_curre
 
 
 @router.post("/reset-password")
-async def reset_password(email: str) -> APIResponse[None]:
+async def reset_password_endpoint(email: str) -> APIResponse[None]:
     """Send password reset email to user."""
-    auth_service = await get_auth_service()
-    result = await auth_service.reset_password(email)
+    result = await service_reset_password(email)
     
     if not result.success:
         raise HTTPException(
