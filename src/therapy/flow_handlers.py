@@ -221,7 +221,21 @@ class ClassificationHandler:
                 session_id=session_id,
                 classification_result=result
             )
-            result = json.loads(result)
+            
+            # Parse JSON result with error handling
+            try:
+                if not result or not result.strip():
+                    raise ValueError("Empty classification result")
+                result = json.loads(result)
+            except (json.JSONDecodeError, ValueError) as e:
+                log_therapy_event(
+                    event="classification_failed",
+                    user_id=user_id,
+                    session_id=session_id,
+                    error=str(e)
+                )
+                # Use default fallback values
+                return {**state, "mode": ClassificationResults.CHAT, "crisis_level": "none", "emotion": "neutral"}
             
             try:
                 mode = ClassificationResults.CHAT if result['mode'] == 'chat' else ClassificationResults.JOURNAL

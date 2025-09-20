@@ -119,14 +119,20 @@ class LLMClient:
             # Validate request
             self._validate_request(request)
             
+ 
+            start_time = time.time()
+            
             # Execute completion
             result = await self._execute_completion(request)
+            
+            # Calculate duration
+            duration_ms = int((time.time() - start_time) * 1000)
             
             # Cache successful response
             self._set_cache(cache_key, result)
             
             # Log metrics
-            self._log_success(request, result)
+            self._log_success(request, result, duration_ms)
             
             return result
             
@@ -166,7 +172,12 @@ class LLMClient:
     def _validate_request(self, request: CompletionRequest) -> None:
         """Enhanced request validation."""
         # Model availability check (simplified)
-        available_models = ["gpt-3.5-turbo", "gpt-4", "claude-3-sonnet", "claude-3-haiku"]
+        available_models = [
+            "gpt-3.5-turbo", "gpt-4", "gpt-4-turbo", 
+            "claude-3-sonnet", "claude-3-haiku", "claude-3-opus",
+            "gemini/gemini-2.0-flash", "gemini/gemini-2.0-flash-lite",
+            "gemini-1.5-pro", "gemini-1.5-flash", "gemini-pro"
+        ]
         if request.model not in available_models:
             logger.warning(f"Unknown model: {request.model}")
         
@@ -184,18 +195,18 @@ class LLMClient:
             f"temp={request.temperature}"
         )
     
-    def _log_success(self, request: CompletionRequest, result: Dict[str, Any]) -> None:
+    def _log_success(self, request: CompletionRequest, result: Dict[str, Any], duration_ms: int) -> None:
         """Log successful completion."""
         usage = result.get('usage', {})
         
         log_performance_metric(
-            metric_name="llm_completion_success",
-            value=1,
-            tags={
-                "model": request.model,
-                "total_tokens": usage.get('total_tokens', 0),
-                "completion_tokens": usage.get('completion_tokens', 0),
-            }
+            operation="llm_completion",
+            duration_ms=duration_ms,
+            success=True,
+            user_id=getattr(request, 'user_id', None),
+            model=request.model,
+            total_tokens=usage.get('total_tokens', 0),
+            completion_tokens=usage.get('completion_tokens', 0)
         )
     
     def _log_failure(self, request: CompletionRequest, error: Exception) -> None:

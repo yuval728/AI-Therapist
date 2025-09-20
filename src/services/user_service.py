@@ -51,15 +51,14 @@ class UserService:
         try:
             result = await self.supabase_client.get_user_profile(user_id)
             
-            if not result.success or not result.data:
+            if not result:
                 return APIResponse(
                     success=False,
                     error="User profile not found",
                     error_code="PROFILE_NOT_FOUND"
                 )
             
-            profile_data = result.data[0]
-            profile = self._build_user_from_data(profile_data)
+            profile = self._build_user_from_data(result)
             
             return APIResponse(
                 success=True,

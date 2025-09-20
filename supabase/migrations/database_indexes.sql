@@ -31,7 +31,7 @@ CREATE INDEX IF NOT EXISTS idx_therapy_sessions_user_status ON therapy_sessions(
 -- CREATE INDEX IF NOT EXISTS idx_memory_logs_embedding ON memory_logs USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 
 -- Composite indexes for common query patterns
-CREATE INDEX IF NOT EXISTS idx_therapy_sessions_user_emotion ON therapy_sessions(user_id, emotion_detected);
+CREATE INDEX IF NOT EXISTS idx_therapy_sessions_user_emotion ON therapy_sessions(user_id, emotion);
 CREATE INDEX IF NOT EXISTS idx_therapy_sessions_user_crisis ON therapy_sessions(user_id, crisis_level);
 
 -- Performance metrics queries

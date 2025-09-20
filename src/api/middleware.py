@@ -106,12 +106,18 @@ class PerformanceMiddleware(BaseHTTPMiddleware):
             return  # Skip rate limit check if recently allowed
         
         # Perform rate limit check
+        from src.utils.rate_limiter import RATE_LIMITS
+        
         rate_result = await check_rate_limit(
             f"global:{client_ip}", 
             "global_requests"
         )
         
         if not rate_result.allowed:
+            # Get limit from configuration
+            config = RATE_LIMITS.get("global_requests")
+            limit = config.requests_per_window if config else None
+            
             # Cache the denial for a short period to avoid repeated checks
             self._set_cache(cache_key, rate_result)
             raise HTTPException(
@@ -119,7 +125,7 @@ class PerformanceMiddleware(BaseHTTPMiddleware):
                 detail={
                     "error": "Rate limit exceeded",
                     "retry_after": rate_result.retry_after,
-                    "limit": rate_result.limit
+                    "limit": limit
                 }
             )
         
@@ -180,7 +186,7 @@ security = HTTPBearer()
 
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)):
-    """Get current authenticated user with optimized caching."""
+    """Get current authenticated user with optimized performance."""
     token = credentials.credentials
     
     try:
@@ -194,12 +200,11 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(
                 headers={"WWW-Authenticate": "Bearer"}
             )
         
-        # Return user data in the format expected by the rest of the application
+        # Return minimal user data in the format expected by the application
         return {
             "user": {
                 "id": result["user_id"],
-                "email": result["email"],
-                "profile": result.get("profile")
+                "email": result["email"]
             }
         }
         

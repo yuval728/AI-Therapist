@@ -133,9 +133,16 @@ class ChatService:
     
     async def check_rate_limit(self, user_id: str, operation_type: str = "api_messages") -> Tuple[bool, Optional[int], Optional[int]]:
         """Check rate limit for user operations."""
+        from src.utils.rate_limiter import RATE_LIMITS
+        
         rate_key = f"chat_{operation_type}:{user_id}"
         rate_result = await check_rate_limit(rate_key, operation_type)
-        return rate_result.allowed, rate_result.retry_after, rate_result.limit
+        
+        # Get limit from configuration
+        config = RATE_LIMITS.get(operation_type)
+        limit = config.requests_per_window if config else None
+        
+        return rate_result.allowed, rate_result.retry_after, limit
     
     @timing_decorator("chat_process_message")
     async def process_chat_message(

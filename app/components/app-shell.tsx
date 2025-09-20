@@ -20,7 +20,7 @@ import { ConnectionStatus } from "@/components/connection-status"
 import { DemoBanner } from "@/components/demo-banner"
 import { useAuth } from "@/hooks/use-auth"
 import { useSessionManagement } from "@/hooks/use-session-management"
-import { useWebSocketChat } from "@/hooks/use-websocket-chat"
+import { useApiChat } from "@/hooks/use-api-chat"
 import { apiClient } from "@/lib/api"
 import { Brain, User, LogOut, Settings, BarChart3, FileText, Menu, X } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
@@ -44,28 +44,31 @@ export function AppShell() {
     createSession,
     setActiveSession,
     getActiveSession,
-    loadMoreSessions,
-    initializeSessions,
-    searchSessions,
+     loadSessions,
+     loadMoreSessions,
   } = useSessionManagement()
 
   const {
     messages,
     connectionStatus,
-    isTyping,
-    streamingState,
-    error: chatError,
-    connect,
-    sendMessage,
-    disconnect,
-    getSessionId,
-    loadOlderMessages,
-    historyLoading,
-    hasMoreHistory,
+    isSending,
+    sendError,
     messagesLoading,
-    messagesInitialized,
-  } = useWebSocketChat(activeSessionId || undefined)
+    hasMore: hasMoreMessages,
+    loadMoreMessages,
+    sendMessage,
+    sessionId: chatSessionId
+  } = useApiChat(activeSessionId || undefined, { 
+    autoCreateSession: true,
+    onSessionCreated: (sessionId) => {
+      // Handle session creation if needed
+    }
+  })
 
+  // Map connectionStatus to the format expected by ConnectionStatus component
+  const apiStatus = connectionStatus === "connected" ? "healthy" : 
+                   connectionStatus === "connecting" ? "checking" :
+                   connectionStatus === "error" ? "error" : "offline"
   const handleNewSession = useCallback(async () => {
     try {
       await createSession()
@@ -84,61 +87,56 @@ export function AppShell() {
   )
 
   const handleLogout = useCallback(() => {
-    disconnect()
     logout()
     toast({
       title: "Logged out",
       description: "You have been successfully logged out.",
     })
     router.push("/auth")
-  }, [disconnect, logout, toast, router])
+  }, [logout, toast, router])
 
   const handleProfileClick = useCallback(() => {
     router.push("/profile")
-  }, [router])
+    }, [router])
 
   const handleStatsClick = useCallback(() => {
-    router.push("/stats")
-  }, [router])
+      router.push("/stats")
+    }, [router])
 
-  // Initialize sessions on mount (only once)
+      const handleSearch = useCallback((query: string) => {
+        // Simple local search implementation
+        return sessions.filter(session => 
+          session.id.toLowerCase().includes(query.toLowerCase()) ||
+          session.emotion?.toLowerCase().includes(query.toLowerCase()) ||
+          session.created_at.includes(query)
+        )
+      }, [sessions])
+
   useEffect(() => {
     mountedRef.current = true
-    initializeSessions()
+      loadSessions()
 
     return () => {
       mountedRef.current = false
     }
-  }, [initializeSessions])
+    }, [loadSessions])
 
   // Redirect to auth if user becomes unauthenticated
   useEffect(() => {
     if (!authLoading && !user && mountedRef.current) {
-      // Ensure we fully disconnect and clear any active session state
-      disconnect()
+      // Clear any active session state
       setActiveSession(null)
       if (typeof window !== "undefined") {
         localStorage.removeItem("activeSessionId")
       }
       router.push("/auth")
     }
-  }, [authLoading, user, disconnect, setActiveSession, router])
+  }, [authLoading, user, setActiveSession, router])
 
-  // Connect WS when a session is selected; disconnect when none is active
-  useEffect(() => {
-    if (activeSessionId && mountedRef.current) {
-      connect()
-    } else if (!activeSessionId) {
-      disconnect()
-    }
-  }, [activeSessionId]) // Remove connect/disconnect from dependencies
+  // Note: useApiChat automatically handles connection based on activeSessionId
+  // No manual connect/disconnect needed
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      disconnect()
-    }
-  }, []) // Empty dependency array for cleanup only
+  // Cleanup is handled automatically by useApiChat hook
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-background via-background to-secondary/20 overflow-hidden">
@@ -185,7 +183,7 @@ export function AppShell() {
 
             {/* Center: Connection Status */}
             <div className="hidden md:block">
-              <ConnectionStatus status={connectionStatus} />
+            <ConnectionStatus status={apiStatus} />
             </div>
 
             {/* Right: User Menu */}
@@ -238,7 +236,7 @@ export function AppShell() {
 
           {/* Mobile Connection Status */}
           <div className="md:hidden mt-2 flex justify-center">
-            <ConnectionStatus status={connectionStatus} />
+          <ConnectionStatus status={apiStatus} />
           </div>
         </div>
       </motion.header>
@@ -268,7 +266,7 @@ export function AppShell() {
                 onSessionSelect={handleSessionSelect}
                 onNewSession={handleNewSession}
                 onLoadMore={loadMoreSessions}
-                onSearch={searchSessions}
+                  onSearch={handleSearch}
               />
             </motion.aside>
           )}
@@ -292,17 +290,15 @@ export function AppShell() {
           <div className="flex-1 flex flex-col">
             <ChatArea
               messages={messages}
-              isTyping={isTyping}
-              streamingState={streamingState}
+              isTyping={isSending}
               onSendMessage={sendMessage}
-              connectionStatus={connectionStatus}
-              error={chatError}
+              error={null}
               activeSession={getActiveSession()}
-              onLoadOlder={loadOlderMessages}
-              hasMoreHistory={hasMoreHistory}
-              historyLoading={historyLoading}
+                onLoadOlder={() => loadMoreMessages()}
+              hasMoreHistory={hasMoreMessages}
+              historyLoading={messagesLoading}
               messagesLoading={messagesLoading}
-              messagesInitialized={messagesInitialized}
+              messagesInitialized={!messagesLoading && messages.length >= 0}
             />
           </div>
 
@@ -335,7 +331,7 @@ export function AppShell() {
                 <TabsContent value="summary" className="h-full m-0">
                   <SessionSummary 
                     sessionId={activeSessionId} 
-                    messagesInitialized={messagesInitialized}
+                    messagesInitialized={!messagesLoading && messages.length >= 0}
                     delayMs={1500}
                   />
                 </TabsContent>

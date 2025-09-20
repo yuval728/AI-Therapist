@@ -89,6 +89,10 @@ interface BackendUserProfileResponse {
 }
 
 class ApiClient {
+  private async fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
+    return fetch(url, options)
+  }
+  
   private getAuthHeaders(): HeadersInit {
     const token = this.getAccessToken()
     return {
@@ -99,7 +103,8 @@ class ApiClient {
 
   private getAccessToken(): string | null {
     if (typeof window !== "undefined") {
-      return localStorage.getItem("access_token")
+      const token = localStorage.getItem("access_token")
+      return token
     }
     return null
   }
@@ -521,6 +526,42 @@ class ApiClient {
     })
   }
 
+  async getDetailedHealthStatus(): Promise<{ status: string; timestamp: string; service: string; components?: Array<{ name: string; status: string; error?: string }> }> {
+    const cacheKey = "detailed-health-status"
+    const cached = apiCache.get<{ status: string; timestamp: string; service: string; components?: Array<{ name: string; status: string; error?: string }> }>(cacheKey)
+    if (cached) {
+      return cached
+    }
+
+    return requestDeduplicator.deduplicate(cacheKey, async () => {
+      if (isDemoMode) {
+        await simulateDelay(300)
+        const health = {
+          status: "healthy",
+          timestamp: new Date().toISOString(),
+          service: "ai-therapist-demo",
+          components: [
+            { name: "database", status: "healthy" },
+            { name: "auth", status: "healthy" }
+          ]
+        }
+        apiCache.set(cacheKey, health, 30 * 60 * 1000)
+        return health
+      }
+
+      const response = await fetch(`${API_BASE_URL}/health/detailed`)
+      const apiResponse: APIResponse<{ status: string; timestamp: string; service: string; components?: Array<{ name: string; status: string; error?: string }> }> = await response.json()
+
+      if (!apiResponse.success || !apiResponse.data) {
+        throw new Error("Detailed health check failed")
+      }
+
+      const health = apiResponse.data
+      apiCache.set(cacheKey, health, 30 * 60 * 1000)
+      return health
+    })
+  }
+
   async getUserProfile(): Promise<User> {
     if (isDemoMode) {
       await simulateDelay(300)
@@ -747,7 +788,9 @@ class ApiClient {
     const headers = this.getAuthHeaders()
 
     try {
-      let response = await fetch(url, {
+      const startTime = performance.now()
+      
+      let response = await this.fetchWithTimeout(url, {
         ...options,
         headers: { ...headers, ...options.headers },
       })
@@ -757,7 +800,8 @@ class ApiClient {
         try {
           await this.refreshToken()
           const newHeaders = this.getAuthHeaders()
-          response = await fetch(url, {
+          
+          response = await this.fetchWithTimeout(url, {
             ...options,
             headers: { ...newHeaders, ...options.headers },
           })
@@ -789,6 +833,12 @@ class ApiClient {
 
       return response
     } catch (error) {
+      if (error instanceof Error && error.message.includes("timeout")) {
+        const timeoutError = new Error(`Request to ${url} timed out`)
+        handleNetworkError(timeoutError, { component: "ApiClient", action: "timeout", url })
+        throw timeoutError
+      }
+      
       if (error instanceof TypeError && error.message.includes("fetch")) {
         handleNetworkError(error, { component: "ApiClient", action: "network_request", url })
       }
@@ -811,17 +861,28 @@ class ApiClient {
   }
 
   private async makeRequest(url: string, options: RequestInit = {}): Promise<Response> {
-    const response = await fetch(url, {
-      headers: { "Content-Type": "application/json" },
-      ...options,
-    })
+    const startTime = performance.now()
+    
+    try {
+      const response = await this.fetchWithTimeout(url, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
+      })
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: response.statusText }))
-      throw new Error(error.message || `Request failed: ${response.statusText}`)
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ message: response.statusText }))
+        throw new Error(error.message || `Request failed: ${response.statusText}`)
+      }
+
+      return response
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("timeout")) {
+        const timeoutError = new Error(`Request to ${url} timed out`)
+        throw timeoutError
+      }
+      
+      throw error
     }
-
-    return response
   }
 
   async login(email: string, password: string): Promise<AuthTokens> {
@@ -837,13 +898,47 @@ class ApiClient {
     return []
   }
 
-  async sendMessage(message: string): Promise<{ reply: string }> {
-    // This will be replaced by WebSocket communication
+  async sendMessage(content: string, sessionId?: string, metadata?: Record<string, any>): Promise<{ reply: string; messageId: string; sessionId: string }> {
     if (isDemoMode) {
       await simulateDelay(1200 + Math.random() * 800)
-      return { reply: getRandomTherapistResponse() }
+      return { 
+        reply: getRandomTherapistResponse(),
+        messageId: `msg_${Date.now()}`,
+        sessionId: sessionId || `session_${Date.now()}`
+      }
     }
-    throw new Error("Use WebSocket for real-time messaging")
+
+    const response = await this.fetchWithAuth(`${API_BASE_URL}/chat/send`, {
+      method: 'POST',
+      body: JSON.stringify({
+        content,
+        session_id: sessionId,
+        metadata: metadata || {}
+      })
+    })
+
+    const apiResponse: APIResponse<{
+      message_id: string
+      session_id: string
+      content: string
+      emotion?: string
+      crisis_level?: string
+      mode?: string
+      processing_time_ms?: number
+      metadata: Record<string, any>
+      timestamp: string
+    }> = await response.json()
+
+    if (!apiResponse.success || !apiResponse.data) {
+      throw new Error(apiResponse.error || "Failed to send message")
+    }
+
+    const data = apiResponse.data
+    return {
+      reply: data.content,
+      messageId: data.message_id,
+      sessionId: data.session_id
+    }
   }
 
   logout(): void {
@@ -851,7 +946,8 @@ class ApiClient {
   }
 
   isAuthenticated(): boolean {
-    return !!this.getAccessToken()
+    const hasToken = !!this.getAccessToken()
+    return hasToken
   }
 
   isDemoMode(): boolean {

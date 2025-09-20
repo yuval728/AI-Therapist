@@ -95,7 +95,7 @@ class MemoryManager:
                 event="memory_appended",
                 user_id=user_id, session_id=session_id, role=role,
                 message_length=len(message.content), total_messages=len(state["messages"]),
-                db_success=result.success
+                db_success=result  # result is a boolean, not an APIResponse
             )
             
         except Exception as e:

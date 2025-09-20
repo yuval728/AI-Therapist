@@ -66,7 +66,7 @@ class SessionService:
                 cutoff = datetime.now(timezone.utc) - timedelta(seconds=45)
                 result = (
                     self.supabase_client.client.table("therapy_sessions")
-                    .select("id,user_id,created_at,emotion_detected,crisis_level,metadata")
+                    .select("session_id,user_id,created_at,updated_at,emotion,crisis_level,metadata")
                     .eq("user_id", user_id)
                     .gte("created_at", cutoff.isoformat())
                     .order("created_at", desc=True)
@@ -95,8 +95,8 @@ class SessionService:
             
             result = await self.supabase_client.create_therapy_session(session)
             
-            if not result.success:
-                logger.error(f"Failed to create session for user {user_id}: {result.error}")
+            if not result:
+                logger.error(f"Failed to create session for user {user_id}")
                 return APIResponse(
                     success=False,
                     error="Failed to create therapy session",
@@ -140,9 +140,9 @@ class SessionService:
             
             # Query database with only needed fields for better performance
             result = self.supabase_client.client.table("therapy_sessions")\
-                .select("id,user_id,created_at,emotion_detected,crisis_level,processing_status,session_summary,metadata,ended_at")\
+                .select("session_id,user_id,created_at,updated_at,emotion,crisis_level,processing_status,session_summary,metadata")\
                 .eq("user_id", user_id)\
-                .eq("id", session_id)\
+                .eq("session_id", session_id)\
                 .single()\
                 .execute()
             
@@ -270,9 +270,24 @@ class SessionService:
         await self._ensure_initialized()
         
         try:
+            # Get current session to preserve existing metadata
+            current_session = await self.get_session(user_id, session_id)
+            if not current_session.success:
+                return current_session
+            
+            # Merge new end session data with existing metadata
+            existing_metadata = current_session.data.metadata or {}
+            end_time = datetime.now(timezone.utc).isoformat()
+            
+            updated_metadata = {
+                **existing_metadata,
+                "session_ended": True,
+                "ended_at": end_time
+            }
+            
             updates = {
-                "ended_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "updated_at": end_time,
+                "metadata": updated_metadata
             }
             
             result = await self.update_session(user_id, session_id, updates)
@@ -347,16 +362,21 @@ class SessionService:
                     order=order,
                 )
 
-            if not result.success:
-                logger.error(f"Failed to fetch messages for session {session_id}")
+            # result is a list of dictionaries, not an APIResponse
+            if not result:
+                logger.warning(f"No messages found for session {session_id}")
                 return APIResponse(
-                    success=False,
-                    error="Failed to retrieve session messages",
-                    error_code="MESSAGES_FETCH_FAILED"
+                    success=True,
+                    data=[],
+                    metadata={
+                        "count": 0,
+                        "order": order,
+                        "has_more": False
+                    }
                 )
             
             # Build messages efficiently
-            messages = [self._build_message_from_data(data) for data in result.data]
+            messages = [self._build_message_from_data(data) for data in result]
             
             # Cache result for future requests (only for standard queries)
             if not after_created_at and not before_created_at:
@@ -402,14 +422,14 @@ class SessionService:
             result = await self.supabase_client.save_memory_log(
                 user_id=user_id,
                 session_id=session_id,
-                role=message.role,
+                role=message.message_type,  # Use message_type as role
                 content=message.content,
                 message_type=message.message_type,
-                emotion=message.emotion,
-                metadata=message.metadata
+                emotion=message.emotion_detected,  # Use emotion_detected
+                metadata={}  # SessionMessage doesn't have metadata field
             )
             
-            if not result.success:
+            if not result:
                 logger.error(f"Failed to save message for session {session_id}")
                 return APIResponse(
                     success=False,
@@ -513,6 +533,16 @@ class SessionService:
     
     def _build_session_from_data(self, session_data: Dict[str, Any]) -> TherapySession:
         """Build TherapySession object from database data."""
+        metadata = session_data.get("metadata", {})
+        
+        # Check if session was ended (stored in metadata since ended_at column doesn't exist)
+        ended_at = None
+        if metadata.get("session_ended") and metadata.get("ended_at"):
+            try:
+                ended_at = datetime.fromisoformat(str(metadata["ended_at"]).replace('Z', '+00:00'))
+            except (ValueError, TypeError):
+                ended_at = None
+        
         return TherapySession(
             id=session_data["session_id"],
             user_id=session_data["user_id"],
@@ -525,12 +555,9 @@ class SessionService:
                 if session_data.get("crisis_level") else None
             ),
             summary=session_data.get("session_summary"),
-            metadata=session_data.get("metadata", {}),
+            metadata=metadata,
             processing_status=ProcessingStatus(session_data.get("processing_status", "pending")),
-            ended_at=(
-                datetime.fromisoformat(str(session_data.get("ended_at")).replace('Z', '+00:00')) 
-                if session_data.get("ended_at") else None
-            ),
+            ended_at=ended_at,
             created_at=datetime.fromisoformat(session_data["created_at"].replace('Z', '+00:00')),
             updated_at=datetime.fromisoformat(session_data["updated_at"].replace('Z', '+00:00'))
         )
@@ -570,7 +597,7 @@ class SessionService:
         """Validate and normalize session update fields."""
         allowed_fields = {
             "emotion", "crisis_level", "processing_status",
-            "session_summary", "metadata", "ended_at"
+            "session_summary", "metadata"
         }
         
         invalid_fields = set(updates.keys()) - allowed_fields

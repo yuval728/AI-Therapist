@@ -119,12 +119,48 @@ async def refresh_token_endpoint(refresh_token: str) -> APIResponse[Dict[str, An
 
 @router.get("/me")
 async def get_current_user_info(current_user: Dict[str, Any] = Depends(get_current_user)) -> APIResponse[Dict[str, Any]]:
-    """Get current authenticated user information."""
+    """Get current authenticated user information (optimized)."""
+    # Return minimal user data needed for frontend authentication
+    user_data = {
+        "user": {
+            "id": current_user["user"]["id"],
+            "email": current_user["user"]["email"]
+        }
+    }
+    
     return APIResponse(
         success=True,
-        data=current_user,
+        data=user_data,
         message="User information retrieved successfully"
     )
+
+
+@router.get("/profile")
+async def get_current_user_profile(current_user: Dict[str, Any] = Depends(get_current_user)) -> APIResponse[Dict[str, Any]]:
+    """Get current user's detailed profile information."""
+    from src.services.auth_service import get_auth_service
+    
+    # Get the auth service and fetch full profile
+    auth_service = await get_auth_service()
+    user_id = current_user["user"]["id"]
+    
+    try:
+        profile_result = await auth_service.supabase_client.get_user_profile(user_id)
+        profile_data = profile_result.get("data", [{}])[0] if profile_result.get("success") else None
+        
+        return APIResponse(
+            success=True,
+            data={
+                "user": current_user["user"],
+                "profile": profile_data
+            },
+            message="User profile retrieved successfully"
+        )
+    except Exception as e:
+        return APIResponse(
+            success=False,
+            error=f"Failed to fetch profile: {str(e)}"
+        )
 
 
 @router.post("/reset-password")

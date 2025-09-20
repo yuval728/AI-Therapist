@@ -7,6 +7,8 @@ import { DemoBanner } from "./demo-banner"
 import { apiClient } from "@/lib/api"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
+import { useApiChat } from "@/hooks/use-api-chat"
+import { useAuth } from "@/hooks/use-auth"
 
 interface ChatMessage {
   sender: "user" | "therapist"
@@ -15,106 +17,107 @@ interface ChatMessage {
 }
 
 export function ChatWindow() {
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [isTyping, setIsTyping] = useState(false)
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
+  const [isLoadingSession, setIsLoadingSession] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const mountedRef = useRef(true)
   const router = useRouter()
   const { toast } = useToast()
+  const { logout: authLogout } = useAuth()
 
-  const loadChatHistory = useCallback(async () => {
+  // Initialize API chat with current session
+  const {
+    messages: apiMessages,
+    sendMessage: apiSendMessage,
+     isTyping,
+     sendError: chatError
+  } = useApiChat(currentSessionId || undefined)
+
+  // Convert API messages to chat format
+  const messages: ChatMessage[] = useMemo(() => {
+    return apiMessages.map(msg => ({
+      sender: msg.role === "user" ? "user" : "therapist",
+      message: msg.content,
+      timestamp: msg.timestamp
+    }))
+  }, [apiMessages])
+
+  const loadCurrentSession = useCallback(async () => {
     if (!mountedRef.current) return
 
     try {
       setError(null)
-      const history = await apiClient.getChatHistory()
+      const session = await apiClient.getCurrentSession()
       if (mountedRef.current) {
-        setMessages(history)
+        setCurrentSessionId(session.id)
       }
     } catch (err) {
-      console.error("Failed to load chat history:", err)
+      console.error("Failed to load current session:", err)
       if (err instanceof Error && err.message === "Session expired") {
         handleLogout()
         return
       }
       if (mountedRef.current) {
-        setError("Failed to load chat history")
+        setError("Failed to load session")
       }
     } finally {
       if (mountedRef.current) {
-        setIsLoading(false)
+        setIsLoadingSession(false)
       }
     }
-  }, []) // Removed dependencies to prevent infinite loops
+  }, [])
 
   const handleLogout = useCallback(() => {
-    apiClient.logout()
+    authLogout()
     toast({
       title: "Logged out",
       description: "You have been successfully logged out.",
     })
     router.push("/auth")
-  }, [toast, router])
+  }, [toast, router, authLogout])
 
   const handleRetry = useCallback(() => {
-    setIsLoading(true)
-    loadChatHistory()
-  }, [loadChatHistory])
+    setIsLoadingSession(true)
+    loadCurrentSession()
+  }, [loadCurrentSession])
 
+  // Load session on mount
   useEffect(() => {
     mountedRef.current = true
-    loadChatHistory()
+    loadCurrentSession()
 
     return () => {
       mountedRef.current = false
     }
-  }, [loadChatHistory])
+  }, [loadCurrentSession])
 
-  const createMessage = useCallback(
-    (sender: "user" | "therapist", message: string): ChatMessage => ({
-      sender,
-      message,
-      timestamp: new Date().toISOString(),
-    }),
-    [],
-  )
+  // Handle chat errors
+  useEffect(() => {
+    if (chatError) {
+        setError(chatError.message || "Chat error occurred")
+    }
+  }, [chatError])
 
   const handleSendMessage = useCallback(
     async (messageText: string) => {
-      const userMessage = createMessage("user", messageText)
-      setMessages((prev) => [...prev, userMessage])
-      setIsTyping(true)
-      setError(null)
+      if (!currentSessionId) {
+        setError("No active session")
+        return
+      }
 
       try {
-        const response = await apiClient.sendMessage(messageText)
-        const therapistMessage = createMessage("therapist", response.reply)
-        if (mountedRef.current) {
-          setMessages((prev) => [...prev, therapistMessage])
-        }
+        setError(null)
+        await apiSendMessage(messageText)
       } catch (err) {
         console.error("Failed to send message:", err)
         if (err instanceof Error && err.message === "Session expired") {
           handleLogout()
           return
         }
-
-        const errorMessage = createMessage(
-          "therapist",
-          "I apologize, but I'm having trouble responding right now. Please try again in a moment.",
-        )
-        if (mountedRef.current) {
-          setMessages((prev) => [...prev, errorMessage])
-          setError("Failed to send message")
-        }
-      } finally {
-        if (mountedRef.current) {
-          setIsTyping(false)
-        }
+        setError("Failed to send message")
       }
     },
-    [createMessage, handleLogout],
+    [currentSessionId, apiSendMessage, handleLogout],
   )
 
   const loadingState = useMemo(
@@ -171,7 +174,7 @@ export function ChatWindow() {
     [error, handleRetry, handleLogout],
   )
 
-  if (isLoading) {
+  if (isLoadingSession) {
     return loadingState
   }
 

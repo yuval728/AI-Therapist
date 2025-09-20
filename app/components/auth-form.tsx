@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { DemoBanner } from "./demo-banner"
+import { ConnectionStatus } from "./connection-status"
 import { useAuth } from "@/hooks/use-auth"
 import { Loader2, Mail, Lock, User, Eye, EyeOff } from "lucide-react"
 import { motion } from "framer-motion"
@@ -31,6 +32,7 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
   const [formError, setFormError] = useState<string | null>(null)
   const [formSuccess, setFormSuccess] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [connectionStatus, setConnectionStatus] = useState<"healthy" | "checking" | "error" | "offline">("healthy")
 
   const { login, signup } = useAuth()
 
@@ -81,27 +83,31 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
     }
 
     setIsSubmitting(true)
+    setConnectionStatus("checking")
 
     try {
       if (mode === "login") {
         await login(email, password)
-        setFormSuccess("Login successful! Redirecting...")
-        // Small delay to ensure auth state is fully updated
-        setTimeout(() => {
-          onSuccess()
-        }, 100)
+        setFormSuccess("Login successful!")
+        setConnectionStatus("healthy")
+        // Navigate immediately after successful login
+        onSuccess()
       } else {
         await signup(email, password, fullName || undefined)
         setFormSuccess("Account created successfully. Please sign in.")
+        setConnectionStatus("healthy")
         resetSignupForm()
         onToggleMode()
       }
     } catch (err) {
+      setConnectionStatus("error")
       const errorMessage = err instanceof Error ? err.message : "Authentication failed"
 
       // Provide more specific error messages
       let userFriendlyMessage = errorMessage
-      if (errorMessage.includes("invalid credentials") || errorMessage.includes("unauthorized")) {
+      if (errorMessage.includes("timeout")) {
+        userFriendlyMessage = "Connection is slow. Please check your internet connection and try again."
+      } else if (errorMessage.includes("invalid credentials") || errorMessage.includes("unauthorized")) {
         userFriendlyMessage = "Invalid email or password. Please try again."
       } else if (errorMessage.includes("user already exists") || errorMessage.includes("email already")) {
         userFriendlyMessage = "An account with this email already exists. Please sign in instead."
@@ -114,6 +120,10 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
       setFormError(userFriendlyMessage)
     } finally {
       setIsSubmitting(false)
+      // Reset connection status to healthy after a delay if no errors
+      if (connectionStatus === "checking") {
+        setTimeout(() => setConnectionStatus("healthy"), 1000)
+      }
     }
   }
 
@@ -178,6 +188,11 @@ export function AuthForm({ mode, onToggleMode, onSuccess }: AuthFormProps) {
               <CardDescription className="text-muted-foreground mt-2">
                 {mode === "login" ? "Sign in to continue your journey" : "Start your mental wellness journey today"}
               </CardDescription>
+              
+              {/* Connection Status Indicator */}
+              <div className="flex justify-center mt-3">
+                <ConnectionStatus status={connectionStatus} className="text-xs" />
+              </div>
             </motion.div>
           </CardHeader>
 

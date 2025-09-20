@@ -12,20 +12,50 @@ export function useAuth() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isHydrated, setIsHydrated] = useState(false)
   const mountedRef = useRef(true)
 
   const checkAuth = useCallback(async () => {
     if (!mountedRef.current) return
 
     try {
-      if (apiClient.isAuthenticated()) {
-        const userData = await apiClient.getCurrentUser()
-        if (mountedRef.current) {
-          setUser(userData)
+      const hasStoredToken = apiClient.isAuthenticated()
+      
+      if (hasStoredToken) {
+        // Try to get user from localStorage first as a fallback
+        let storedUserData = null
+        if (typeof window !== "undefined") {
+          const storedUser = localStorage.getItem("user")
+          if (storedUser && mountedRef.current) {
+            try {
+              storedUserData = JSON.parse(storedUser)
+              setUser(storedUserData)
+            } catch (e) {
+              // Failed to parse stored user data
+            }
+          }
+        }
+        
+        // Then try to refresh from API (but don't block on it if it's slow)
+        try {
+          const userData = await apiClient.getCurrentUser()
+          if (mountedRef.current) {
+            setUser(userData)
+          }
+        } catch (apiError) {
+          // If this is a timeout error and we have a stored user, that's okay
+          if (apiError instanceof Error && apiError.message.includes("timeout") && storedUserData) {
+            // Using localStorage user due to API timeout
+          } else {
+            // For other errors, we should probably clear the authentication
+            if (mountedRef.current) {
+              setUser(null)
+              setError("Authentication check failed")
+            }
+          }
         }
       }
     } catch (err) {
-      console.error("Auth check failed:", err)
       if (mountedRef.current) {
         setError(err instanceof Error ? err.message : "Authentication failed")
       }
@@ -38,6 +68,10 @@ export function useAuth() {
 
   useEffect(() => {
     mountedRef.current = true
+    
+    // Mark as hydrated when component mounts on client
+    setIsHydrated(true)
+    
     checkAuth()
 
     const handleAuthLogout = () => {
@@ -72,12 +106,15 @@ export function useAuth() {
     try {
       setError(null)
       setLoading(true)
-      const response = await apiClient.login(email, password)
-      const userData = await apiClient.getCurrentUser()
+      
+      const authTokens = await apiClient.login(email, password)
+      
       if (mountedRef.current) {
-        setUser(userData)
+        setUser(authTokens.user)
+        // Force an auth check to ensure state is consistent
+        await checkAuth()
       }
-      return response
+      return authTokens
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Login failed"
       if (mountedRef.current) {
@@ -89,7 +126,7 @@ export function useAuth() {
         setLoading(false)
       }
     }
-  }, [])
+  }, [checkAuth])
 
   const signup = useCallback(async (email: string, password: string, fullName?: string) => {
     try {
@@ -125,7 +162,21 @@ export function useAuth() {
     login,
     signup,
     logout,
-    isAuthenticated: !!user,
+    isAuthenticated: (() => {
+      // Don't check auth status until after hydration to prevent SSR mismatch
+      if (!isHydrated) {
+        return false
+      }
+      
+      // Check both user state AND token in localStorage to prevent race conditions
+      const hasToken = apiClient.isAuthenticated()
+      const hasUser = !!user
+      
+      // If we're still loading but have a token, we should consider the user authenticated
+      // This prevents the race condition where the token exists but user data is still loading
+      const authenticated = hasToken && (hasUser || loading)
+      return authenticated
+    })(),
     refresh: checkAuth,
   }
 }

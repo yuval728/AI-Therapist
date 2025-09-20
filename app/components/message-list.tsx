@@ -11,7 +11,6 @@ interface ChatMessage {
   sender: "user" | "therapist"
   message: string
   timestamp: string
-  isStreaming?: boolean
 }
 
 interface MessageListProps {
@@ -285,7 +284,6 @@ export function MessageList({
                   sender={message.sender}
                   timestamp={message.timestamp}
                   index={index}
-                  isStreaming={message.isStreaming}
                 />
               </motion.div>
             ))}
