@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Optional, Tuple
 import logging
 
 from src.models import (
-    SessionMessage, EmotionType, APIResponse, PaginationParams
+    SessionMessage, APIResponse, PaginationParams
 )
 from src.services.session_service import get_session_service
 from src.therapy.graphs.therapy_flow import build_therapy_graph
@@ -170,21 +170,7 @@ class ChatService:
                     )
                 session_id = session_result.data.id
             
-            # Create user message
-            user_message = SessionMessage(
-                session_id=session_id,
-                user_id=user_id,
-                content=content,
-                message_type="user",
-                metadata=metadata or {}
-            )
-            
-            # Save user message and process therapy response concurrently
-            user_msg_task = asyncio.create_task(
-                self._session_service.add_session_message(user_id, session_id, user_message)
-            )
-            
-            # Get therapy graph and process message
+            # Get therapy graph and process message (graph handles message saving internally)
             therapy_graph = await self._get_cached_therapy_graph(session_id)
             start_time = datetime.now(timezone.utc)
             
@@ -200,23 +186,12 @@ class ChatService:
                 "metadata": metadata or {}
             }
             
-            therapy_task = asyncio.create_task(therapy_graph.ainvoke(initial_state))
+            # Process message through therapy graph
+            therapy_result = await therapy_graph.ainvoke(initial_state)
             
-            # Wait for both operations
-            user_msg_result, therapy_result = await asyncio.gather(
-                user_msg_task, therapy_task, return_exceptions=True
-            )
-            
-            # Check results
-            if isinstance(user_msg_result, Exception) or not user_msg_result.success:
-                logger.error(f"Failed to save user message: {user_msg_result}")
-                return APIResponse(
-                    success=False,
-                    error="Failed to save user message"
-                )
-            
-            if isinstance(therapy_result, Exception):
-                logger.exception(f"Therapy processing failed: {therapy_result}")
+            # Check result
+            if not therapy_result:
+                logger.error("Therapy processing returned empty result")
                 return APIResponse(
                     success=False,
                     error="Failed to process message"
@@ -224,29 +199,9 @@ class ChatService:
             
             processing_time = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
             
-            # Create AI message
-            ai_message = SessionMessage(
-                session_id=session_id,
-                user_id=user_id,
-                content=therapy_result.get("response", ""),
-                message_type="ai_response",
-                emotion_detected=EmotionType(therapy_result.get("emotion", "neutral")),
-                metadata={
-                    **therapy_result.get("metadata", {}),
-                    "processing_time_ms": processing_time,
-                    "mode": therapy_result.get("mode", "chat"),
-                    "crisis_level": therapy_result.get("crisis_level", "none")
-                }
-            )
             
-            # Save AI message in background
-            asyncio.create_task(
-                self._session_service.add_session_message(user_id, session_id, ai_message)
-            )
             
-            # Log therapy interaction for analytics
-            asyncio.create_task(
-                log_therapy_event(
+            log_therapy_event(
                     event="chat_interaction",
                     user_id=user_id,
                     session_id=session_id,
@@ -256,9 +211,9 @@ class ChatService:
                         "crisis_level": therapy_result.get("crisis_level"),
                         "mode": therapy_result.get("mode"),
                         "response_length": len(therapy_result.get("response", "")),
-                    }
-                )
+                }
             )
+            
             
             # Return processing result
             result = ChatProcessingResult(
@@ -538,28 +493,7 @@ class ChatService:
                 # Small delay between chunks for streaming effect
                 await asyncio.sleep(0.1)
             
-            # Save messages
-            user_message = SessionMessage(
-                session_id=session_id,
-                user_id=streaming_session.user_id,
-                content=streaming_session.content,
-                message_type="user",
-                metadata=streaming_session.metadata
-            )
-            
-            ai_message = SessionMessage(
-                session_id=session_id,
-                user_id=streaming_session.user_id,
-                content=response_text,
-                message_type="ai_response",
-                emotion_detected=EmotionType(result.get("emotion", "neutral")),
-                metadata=result.get("metadata", {})
-            )
-            
-            await self._session_service.add_session_message(streaming_session.user_id, session_id, user_message)
-            await self._session_service.add_session_message(streaming_session.user_id, session_id, ai_message)
-            
-            # Mark as completed
+            # Mark as completed (message saving handled by therapy graph)
             streaming_session.status = "completed"
             streaming_session.completion_time = datetime.now(timezone.utc)
             

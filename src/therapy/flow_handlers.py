@@ -226,10 +226,22 @@ class ClassificationHandler:
             try:
                 if not result or not result.strip():
                     raise ValueError("Empty classification result")
-                result = json.loads(result)
+                
+                # Extract JSON from markdown formatting if present
+                if "```json" in result:
+                    start = result.find('{')
+                    end = result.rfind('}') + 1
+                    if start != -1 and end > start:
+                        json_str = result[start:end]
+                    else:
+                        raise ValueError("Could not extract JSON from markdown")
+                else:
+                    json_str = result.strip()
+                
+                result = json.loads(json_str)
             except (json.JSONDecodeError, ValueError) as e:
                 log_therapy_event(
-                    event="classification_failed",
+                    event="classification_failed_json",
                     user_id=user_id,
                     session_id=session_id,
                     error=str(e)
