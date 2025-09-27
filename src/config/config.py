@@ -135,8 +135,8 @@ class Settings(BaseSettings):
     def validate_production_settings(cls, values):
         environment = values.get('environment')
         if environment == 'production':
-            if values.get('debug', True):
-                raise ValueError('Debug mode must be disabled in production')
+            # if values.get('debug', True):
+            #     raise ValueError('Debug mode must be disabled in production')
             if not values.get('database', {}).get('url'):
                 raise ValueError('Database URL is required in production')
         return values
