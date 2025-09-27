@@ -45,14 +45,14 @@ class RateLimiter:
     
     async def check_rate_limit(self, key: str, config: RateLimitConfig) -> RateLimitResult:
         """Check if request is within rate limit."""
-        cache_manager = await self._get_cache_manager()
+        # cache_manager = await self._get_cache_manager()
         
-        # Try Redis first, fallback to memory
-        if cache_manager and cache_manager.redis_client:
-            try:
-                return await self._check_redis(key, config, cache_manager)
-            except Exception as e:
-                log_event(event="redis_rate_limit_error", key=key, error=str(e))
+        # # Try Redis first, fallback to memory
+        # if cache_manager and cache_manager.redis_client:
+        #     try:
+        #         return await self._check_redis(key, config, cache_manager)
+        #     except Exception as e:
+        #         log_event(event="redis_rate_limit_error", key=key, error=str(e))
         
         return await self._check_memory(key, config)
     

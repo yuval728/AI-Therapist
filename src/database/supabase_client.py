@@ -58,7 +58,8 @@ class SupabaseClient:
         
         try:
             self.embeddings = GoogleGenerativeAIEmbeddings(
-                model="models/embedding-001",
+                # model="models/embedding-001",
+                model=os.getenv("MODEL_EMBEDDING") or self.settings.model.embedding_model,
                 google_api_key=google_api_key
             )
             self.vector_store = SupabaseVectorStore(

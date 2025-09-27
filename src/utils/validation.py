@@ -1,6 +1,7 @@
 import re
 import hashlib
 import html
+import math
 import asyncio
 from typing import Any, Dict, List, Optional
 from collections import defaultdict, deque
@@ -107,7 +108,8 @@ def calculate_entropy(text: str) -> float:
     for count in char_counts.values():
         probability = count / text_len
         if probability > 0:
-            entropy -= probability * (probability.bit_length() - 1)
+            import math
+            entropy -= probability * math.log2(probability)
     
     return entropy
 
