@@ -1,9 +1,9 @@
 """Enhanced therapy service with improved flow management and monitoring."""
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
-from src.models import TherapySession, SessionMessage, EmotionType, CrisisLevel
-from src.core import chat_completion, classify_text
-from src.utils import log_therapy_event, timing_decorator, ValidationError
+from src.models import EmotionType, CrisisLevel
+from src.therapy.llm_utils import chat_completion
+from src.utils import log_therapy_event, timing_decorator
 from src.config import get_settings
 from src.config.constants import SystemPrompts, Limits
 

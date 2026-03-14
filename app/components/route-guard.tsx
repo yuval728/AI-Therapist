@@ -25,6 +25,7 @@ export function RouteGuard({ children, requireAuth = true, redirectTo }: RouteGu
       }
 
       if (!requireAuth && isAuthenticated) {
+        // Navigate immediately when user is authenticated on auth page
         router.push(redirectTo || "/chat")
         return
       }
@@ -38,7 +39,8 @@ export function RouteGuard({ children, requireAuth = true, redirectTo }: RouteGu
       <div className="h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-secondary/20">
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-muted-foreground">Loading...</p>
+          <p className="text-muted-foreground mb-2">Checking authentication...</p>
+          <p className="text-xs text-muted-foreground/70">This may take a few moments</p>
         </div>
       </div>
     )

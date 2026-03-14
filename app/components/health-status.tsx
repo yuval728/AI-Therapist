@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -11,36 +11,83 @@ import { Activity, Server, Wifi, RefreshCw, CheckCircle, XCircle, AlertTriangle,
 import { motion } from "framer-motion"
 import { cn, formatTimestamp } from "@/lib/utils"
 
+
 interface HealthData {
   status: string
   timestamp: string
   service: string
+  components?: Array<{
+    name: string
+    status: string
+    error?: string
+    version?: string
+    performance_mode?: string
+  }>
+  error?: string
+  version?: string
+  performance_mode?: string
+  degraded?: boolean
+  fallback?: boolean
 }
 
 export function HealthStatus() {
+
   const [health, setHealth] = useState<HealthData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [lastChecked, setLastChecked] = useState<Date | null>(null)
+  const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const mountedRef = useRef(true)
 
+  // Enhanced health check using API client
   const checkHealth = useCallback(async () => {
+    if (!mountedRef.current) return
+
     try {
       setError(null)
-      const healthData = await apiClient.getHealthStatus()
-      setHealth(healthData)
-      setLastChecked(new Date())
+      
+      // Try detailed health check first
+      let healthData: HealthData | null = null
+      try {
+        healthData = await apiClient.getDetailedHealthStatus()
+      } catch (detailedError) {
+        console.warn("Detailed health check failed, falling back to basic health check:", detailedError)
+        try {
+          healthData = await apiClient.getHealthStatus()
+        } catch (basicError) {
+          throw basicError
+        }
+      }
+
+      if (mountedRef.current && healthData) {
+        setHealth(healthData)
+        setLastChecked(new Date())
+      }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Health check failed"
-      setError(errorMessage)
+      if (mountedRef.current) {
+        const errorMessage = error instanceof Error ? error.message : "Health check failed"
+        setError(errorMessage)
+      }
     } finally {
-      setLoading(false)
+      if (mountedRef.current) {
+        setLoading(false)
+      }
     }
   }, [])
 
   useEffect(() => {
+    mountedRef.current = true
     checkHealth()
-    const interval = setInterval(checkHealth, 30000)
-    return () => clearInterval(interval)
+
+    intervalRef.current = setInterval(checkHealth, 30000)
+
+    return () => {
+      mountedRef.current = false
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
+    }
   }, [checkHealth])
 
   const getStatusConfig = useCallback((status: string) => {
@@ -68,13 +115,15 @@ export function HealthStatus() {
       },
     } as const
 
-    return configs[status.toLowerCase() as keyof typeof configs] || {
-      icon: AlertTriangle,
-      color: "text-gray-600",
-      bgColor: "bg-gray-500/10",
-      borderColor: "border-gray-500/20",
-      label: "Unknown",
-    }
+    return (
+      configs[status.toLowerCase() as keyof typeof configs] || {
+        icon: AlertTriangle,
+        color: "text-gray-600",
+        bgColor: "bg-gray-500/10",
+        borderColor: "border-gray-500/20",
+        label: "Unknown",
+      }
+    )
   }, [])
 
   const statusConfig = health ? getStatusConfig(health.status) : null
@@ -143,9 +192,7 @@ export function HealthStatus() {
 
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Last Updated</span>
-                    <span className="text-foreground font-medium">
-                      {formatTimestamp(health.timestamp)}
-                    </span>
+                    <span className="text-foreground font-medium">{formatTimestamp(health.timestamp)}</span>
                   </div>
 
                   {lastChecked && (
@@ -154,7 +201,57 @@ export function HealthStatus() {
                       <span className="text-foreground font-medium">{formatTimestamp(lastChecked.toISOString())}</span>
                     </div>
                   )}
+
+                  {/* Enhanced: show backend version, performance mode, degraded/fallback */}
+                  {health.version && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Backend Version</span>
+                      <span className="text-foreground font-medium">{health.version}</span>
+                    </div>
+                  )}
+                  {health.performance_mode && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Performance Mode</span>
+                      <span className="text-foreground font-medium">{health.performance_mode}</span>
+                    </div>
+                  )}
+                  {health.degraded && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Degraded Mode</span>
+                      <Badge variant="destructive">Degraded</Badge>
+                    </div>
+                  )}
+                  {health.fallback && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Fallback Mode</span>
+                      <Badge variant="outline">Fallback</Badge>
+                    </div>
+                  )}
+                  {health.error && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Error</span>
+                      <span className="text-foreground font-medium">{health.error}</span>
+                    </div>
+                  )}
                 </div>
+
+                {/* Enhanced: show backend components */}
+                {health.components && health.components.length > 0 && (
+                  <div className="mt-4">
+                    <div className="font-semibold text-xs mb-2 text-muted-foreground">Backend Components</div>
+                    <div className="space-y-2">
+                      {health.components.map((comp, idx) => (
+                        <div key={comp.name + idx} className="flex items-center justify-between text-xs">
+                          <span className="font-medium">{comp.name}</span>
+                          <span className={cn("font-medium", comp.status === "healthy" ? "text-green-600" : comp.status === "degraded" ? "text-yellow-600" : "text-red-600")}>{comp.status}</span>
+                          {comp.version && <span className="ml-2 text-muted-foreground">v{comp.version}</span>}
+                          {comp.performance_mode && <span className="ml-2 text-muted-foreground">{comp.performance_mode}</span>}
+                          {comp.error && <span className="ml-2 text-destructive">{comp.error}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </motion.div>
@@ -174,7 +271,7 @@ export function HealthStatus() {
               <div className="space-y-3">
                 <div className="flex items-center gap-3">
                   <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                  <span className="text-sm text-foreground">WebSocket Connected</span>
+                    <span className="text-sm text-foreground">API Connected</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="w-2 h-2 bg-blue-500 rounded-full" />

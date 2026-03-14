@@ -1,3 +1,62 @@
+interface LogLevel {
+  DEBUG: "debug"
+  INFO: "info"
+  WARN: "warn"
+  ERROR: "error"
+}
+
+const LOG_LEVELS: LogLevel = {
+  DEBUG: "debug",
+  INFO: "info",
+  WARN: "warn",
+  ERROR: "error",
+}
+
+class Logger {
+  private isDevelopment = process.env.NODE_ENV === "development"
+
+  private log(level: keyof LogLevel, message: string, ...args: unknown[]) {
+    if (!this.isDevelopment && level === "DEBUG") return
+
+    const timestamp = new Date().toISOString()
+    const prefix = `[${timestamp}] [WebSocket] [${level}]`
+
+    switch (level) {
+      case "ERROR":
+        console.error(prefix, message, ...args)
+        break
+      case "WARN":
+        console.warn(prefix, message, ...args)
+        break
+      case "INFO":
+        console.info(prefix, message, ...args)
+        break
+      case "DEBUG":
+      default:
+        console.log(prefix, message, ...args)
+        break
+    }
+  }
+
+  debug(message: string, ...args: unknown[]) {
+    this.log("DEBUG", message, ...args)
+  }
+
+  info(message: string, ...args: unknown[]) {
+    this.log("INFO", message, ...args)
+  }
+
+  warn(message: string, ...args: unknown[]) {
+    this.log("WARN", message, ...args)
+  }
+
+  error(message: string, ...args: unknown[]) {
+    this.log("ERROR", message, ...args)
+  }
+}
+
+const logger = new Logger()
+
 export interface WebSocketMessage {
   type: "connected" | "typing" | "response_chunk" | "response_complete" | "pong" | "error"
   session_id?: string
@@ -7,7 +66,7 @@ export interface WebSocketMessage {
   emotion?: string
   crisis_level?: number
   mode?: string
-  metadata?: Record<string, any>
+  metadata?: Record<string, unknown>
   error?: string
   error_code?: string
   timestamp: string
@@ -55,7 +114,7 @@ export class WebSocketClient {
         this.ws = new WebSocket(this.wsUrl)
 
         this.ws.onopen = () => {
-          console.log("[v0] WebSocket connected")
+          logger.info("WebSocket connected")
           this.reconnectAttempts = 0
           this.reconnectDelay = 1000
 
@@ -69,7 +128,7 @@ export class WebSocketClient {
         this.ws.onmessage = (event) => {
           try {
             const message: WebSocketMessage = JSON.parse(event.data)
-            console.log("[v0] WebSocket message received:", message.type)
+            logger.debug("WebSocket message received:", message.type)
 
             if (message.type === "connected") {
               this.setConnectionStatus("connected")
@@ -81,13 +140,13 @@ export class WebSocketClient {
 
             this.options.onMessage?.(message)
           } catch (error) {
-            console.error("[v0] Failed to parse WebSocket message:", error)
+            logger.error("Failed to parse WebSocket message:", error)
             this.options.onError?.("Failed to parse message")
           }
         }
 
         this.ws.onclose = (event) => {
-          console.log("[v0] WebSocket closed:", event.code, event.reason)
+          logger.info("WebSocket closed:", event.code, event.reason)
           this.setConnectionStatus("disconnected")
           this.stopPingInterval()
 
@@ -97,12 +156,12 @@ export class WebSocketClient {
         }
 
         this.ws.onerror = (error) => {
-          console.error("[v0] WebSocket error:", error)
+          logger.error("WebSocket error:", error)
           this.options.onError?.("Connection error")
           reject(new Error("WebSocket connection failed"))
         }
       } catch (error) {
-        console.error("[v0] Failed to create WebSocket:", error)
+        logger.error("Failed to create WebSocket:", error)
         this.setConnectionStatus("disconnected")
         reject(error)
       }
@@ -116,7 +175,7 @@ export class WebSocketClient {
         ...(this.sessionId && { session_id: this.sessionId }),
       }
       this.ws.send(JSON.stringify(authMessage))
-      console.log("[v0] Sent auth message")
+      logger.debug("Sent auth message")
     }
   }
 
@@ -127,9 +186,9 @@ export class WebSocketClient {
         content,
       }
       this.ws.send(JSON.stringify(message))
-      console.log("[v0] Sent chat message")
+      logger.debug("Sent chat message")
     } else {
-      console.warn("[v0] Cannot send message: WebSocket not connected")
+      logger.warn("Cannot send message: WebSocket not connected")
       this.options.onError?.("Not connected")
     }
   }
@@ -165,12 +224,12 @@ export class WebSocketClient {
 
     const delay = Math.min(this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1), this.maxReconnectDelay)
 
-    console.log(`[v0] Scheduling reconnect attempt ${this.reconnectAttempts} in ${delay}ms`)
+    logger.info(`Scheduling reconnect attempt ${this.reconnectAttempts} in ${delay}ms`)
 
     this.reconnectTimer = setTimeout(() => {
       if (this.accessToken) {
         this.connect(this.accessToken, this.sessionId).catch((error) => {
-          console.error("[v0] Reconnect failed:", error)
+          logger.error("Reconnect failed:", error)
         })
       }
     }, delay)
@@ -179,7 +238,7 @@ export class WebSocketClient {
   private setConnectionStatus(status: ConnectionStatus): void {
     if (this.connectionStatus !== status) {
       this.connectionStatus = status
-      console.log("[v0] Connection status changed:", status)
+      logger.debug("Connection status changed:", status)
       this.options.onConnectionChange?.(status)
     }
   }
@@ -193,7 +252,7 @@ export class WebSocketClient {
   }
 
   disconnect(): void {
-    console.log("[v0] Disconnecting WebSocket")
+    logger.info("Disconnecting WebSocket")
     this.stopPingInterval()
 
     if (this.reconnectTimer) {

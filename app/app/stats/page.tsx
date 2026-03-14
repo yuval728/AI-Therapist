@@ -40,7 +40,7 @@ export default function StatsPage() {
     try {
       setError(null)
       const userStats = await apiClient.getUserStats()
-      setStats(userStats as UserStats)
+      setStats(userStats as unknown as UserStats)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to load stats"
       setError(errorMessage)
@@ -84,8 +84,8 @@ export default function StatsPage() {
 
   return (
     <RouteGuard requireAuth={true}>
-      <div className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/20 p-4">
-        <div className="max-w-4xl mx-auto">
+      <div className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/20 p-4 overflow-y-auto custom-scrollbar">
+        <div className="max-w-4xl mx-auto pb-8">
           {/* Header */}
           <motion.div
             initial={{ opacity: 0, y: -20 }}

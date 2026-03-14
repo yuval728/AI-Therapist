@@ -7,7 +7,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { AlertTriangle, RefreshCw } from "lucide-react"
 import { motion } from "framer-motion"
-import type { ConnectionStatus } from "@/lib/websocket-client"
 import type { TherapySession } from "@/lib/api"
 
 interface ChatMessage {
@@ -21,64 +20,44 @@ interface ChatMessage {
   metadata?: Record<string, any>
 }
 
-interface StreamingState {
-  content: string
-  isStreaming: boolean
-  metadata?: {
-    emotion?: string
-    crisis_level?: number
-    mode?: string
-    metadata?: Record<string, any>
-  }
-}
 
 interface ChatAreaProps {
   messages: ChatMessage[]
   isTyping: boolean
-  streamingState: StreamingState
   onSendMessage: (content: string) => Promise<void>
-  connectionStatus: ConnectionStatus
   error: string | null
   activeSession: TherapySession | null
   // Pagination controls
   onLoadOlder?: () => Promise<void> | void
   hasMoreHistory?: boolean
   historyLoading?: boolean
+  // New props for improved loading
+  messagesLoading?: boolean
+  messagesInitialized?: boolean
 }
 
 export function ChatArea({
   messages,
   isTyping,
-  streamingState,
   onSendMessage,
-  connectionStatus,
   error,
   activeSession,
   onLoadOlder,
   hasMoreHistory,
   historyLoading,
+  messagesLoading,
+  messagesInitialized,
 }: ChatAreaProps) {
-  const isConnected = connectionStatus === "connected"
-  // Allow typing even when disconnected; sendMessage will lazy-connect
   const isDisabled = isTyping
 
   // Convert messages to the format expected by MessageList
-  type DisplayMessage = { sender: "user" | "therapist"; message: string; timestamp: string; isStreaming?: boolean }
+  type DisplayMessage = { sender: "user" | "therapist"; message: string; timestamp: string }
   const formattedMessages: DisplayMessage[] = messages.map((msg) => ({
     sender: msg.role === "user" ? ("user" as const) : ("therapist" as const),
     message: msg.content,
     timestamp: msg.timestamp,
   }))
 
-  const allMessages: DisplayMessage[] = [...formattedMessages]
-  if (streamingState.isStreaming && streamingState.content) {
-    allMessages.push({
-      sender: "therapist" as const,
-      message: streamingState.content,
-      timestamp: new Date().toISOString(),
-      isStreaming: true,
-    })
-  }
 
   const handleRetry = () => {
     // Trigger reconnection logic
@@ -86,7 +65,7 @@ export function ChatArea({
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="flex-1 flex flex-col h-full overflow-hidden">
       {/* Error Alert */}
       {error && (
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mx-4 mt-4">
@@ -104,32 +83,24 @@ export function ChatArea({
       )}
 
       {/* Messages with Load Older */}
-      <div className="flex-1 overflow-hidden">
-        <div className="px-4 pt-4">
-          {hasMoreHistory && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={historyLoading}
-              onClick={() => onLoadOlder && onLoadOlder()}
-              className="w-full mb-2"
-            >
-              {historyLoading ? "Loading..." : "Load older messages"}
-            </Button>
-          )}
-        </div>
-        <MessageList messages={allMessages} isTyping={isTyping && !streamingState.isStreaming} />
-      </div>
+      <MessageList 
+        messages={formattedMessages} 
+        isTyping={isTyping}
+        onLoadMore={onLoadOlder}
+        hasMore={hasMoreHistory}
+        isLoadingMore={historyLoading}
+        loading={messagesLoading}
+      />
 
-      {/* Session Metadata */}
-      {streamingState.metadata && (
+      {/* Session Metadata - Show from active session */}
+      {activeSession && (
         <div className="px-4">
           <SessionMetadata
-            emotion={streamingState.metadata.emotion}
-            crisis_level={streamingState.metadata.crisis_level}
-            mode={streamingState.metadata.mode}
-            metadata={streamingState.metadata.metadata}
-            timestamp={new Date().toISOString()}
+              emotion={activeSession.emotion}
+            crisis_level={activeSession.crisis_level}
+              mode="therapy"
+            metadata={activeSession.metadata}
+            timestamp={activeSession.updated_at}
           />
         </div>
       )}
@@ -139,11 +110,9 @@ export function ChatArea({
         onSendMessage={onSendMessage}
         disabled={isDisabled}
         placeholder={
-          !isConnected
-            ? "Type your message to start the chat"
-            : isTyping
-              ? "AI is responding..."
-              : "How are you feeling today?"
+          isTyping
+            ? "AI is responding..."
+            : "How are you feeling today?"
         }
       />
     </div>

@@ -35,6 +35,20 @@ from .state import (
     JournalEntry,
     ClassificationFormat
 )
+from .chat_models import (
+    ChatMessageRequest,
+    ChatMessageResponse,
+    TypingStatusResponse,
+    StreamingChatResponse
+)
+from .validation_models import (
+    ValidationResult,
+    SecurityConfig
+)
+from .therapy_models import (
+    CrisisAnalyzer,
+    EmotionAnalyzer
+)
 
 __all__ = [
     # Base models
@@ -71,5 +85,19 @@ __all__ = [
     "MemoryEntry",
     "CrisisEvent",
     "JournalEntry",
-    "ClassificationFormat"
+    "ClassificationFormat",
+    
+    # Chat models
+    "ChatMessageRequest",
+    "ChatMessageResponse",
+    "TypingStatusResponse",
+    "StreamingChatResponse",
+    
+    # Validation models
+    "ValidationResult",
+    "SecurityConfig",
+    
+    # Therapy tool models
+    "CrisisAnalyzer",
+    "EmotionAnalyzer"
 ]

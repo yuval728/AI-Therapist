@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -20,7 +20,7 @@ import { ConnectionStatus } from "@/components/connection-status"
 import { DemoBanner } from "@/components/demo-banner"
 import { useAuth } from "@/hooks/use-auth"
 import { useSessionManagement } from "@/hooks/use-session-management"
-import { useWebSocketChat } from "@/hooks/use-websocket-chat"
+import { useApiChat } from "@/hooks/use-api-chat"
 import { apiClient } from "@/lib/api"
 import { Brain, User, LogOut, Settings, BarChart3, FileText, Menu, X } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
@@ -31,6 +31,7 @@ import { useToast } from "@/hooks/use-toast"
 export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [rightPanelTab, setRightPanelTab] = useState("summary")
+  const mountedRef = useRef(true)
   const { user, logout, loading: authLoading } = useAuth()
   const router = useRouter()
   const { toast } = useToast()
@@ -43,88 +44,102 @@ export function AppShell() {
     createSession,
     setActiveSession,
     getActiveSession,
-    loadMoreSessions,
-    initializeSessions,
-    searchSessions,
+     loadSessions,
+     loadMoreSessions,
   } = useSessionManagement()
 
   const {
     messages,
     connectionStatus,
-    isTyping,
-    streamingState,
-    error: chatError,
-    connect,
+    isSending,
+    sendError,
+    messagesLoading,
+    hasMore: hasMoreMessages,
+    loadMoreMessages,
     sendMessage,
-    disconnect,
-    getSessionId,
-    loadOlderMessages,
-    historyLoading,
-    hasMoreHistory,
-  } = useWebSocketChat(activeSessionId || undefined)
-
-  // Initialize sessions on mount (only once)
-  useEffect(() => {
-    initializeSessions()
-  }, []) // Remove dependency to prevent re-initialization
-
-  // Redirect to auth if user becomes unauthenticated
-  useEffect(() => {
-    if (!authLoading && !user) {
-      // Ensure we fully disconnect and clear any active session state
-      disconnect()
-      setActiveSession(null)
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("activeSessionId")
-      }
-      router.push("/auth")
+    sessionId: chatSessionId
+  } = useApiChat(activeSessionId || undefined, { 
+    autoCreateSession: true,
+    onSessionCreated: (sessionId) => {
+      // Handle session creation if needed
     }
-  }, [authLoading, user, disconnect, setActiveSession, router])
+  })
 
-  // Connect WS when a session is selected; disconnect when none is active
-  useEffect(() => {
-    if (activeSessionId) {
-      connect()
-    } else {
-      disconnect()
-    }
-    return () => disconnect()
-  }, [activeSessionId, connect, disconnect])
-
-  const handleNewSession = async () => {
+  // Map connectionStatus to the format expected by ConnectionStatus component
+  const apiStatus = connectionStatus === "connected" ? "healthy" : 
+                   connectionStatus === "connecting" ? "checking" :
+                   connectionStatus === "error" ? "error" : "offline"
+  const handleNewSession = useCallback(async () => {
     try {
       await createSession()
       setSidebarOpen(false) // Close sidebar on mobile after creating session
     } catch (error) {
       console.error("Failed to create session:", error)
     }
-  }
+  }, [createSession])
 
-  const handleSessionSelect = (sessionId: string) => {
-    setActiveSession(sessionId)
-    setSidebarOpen(false) // Close sidebar on mobile after selecting session
-  }
+  const handleSessionSelect = useCallback(
+    (sessionId: string) => {
+      setActiveSession(sessionId)
+      setSidebarOpen(false) // Close sidebar on mobile after selecting session
+    },
+    [setActiveSession],
+  )
 
-  const handleLogout = () => {
-    disconnect()
+  const handleLogout = useCallback(() => {
     logout()
     toast({
       title: "Logged out",
       description: "You have been successfully logged out.",
     })
     router.push("/auth")
-  }
+  }, [logout, toast, router])
 
-  const handleProfileClick = () => {
+  const handleProfileClick = useCallback(() => {
     router.push("/profile")
-  }
+    }, [router])
 
-  const handleStatsClick = () => {
-    router.push("/stats")
-  }
+  const handleStatsClick = useCallback(() => {
+      router.push("/stats")
+    }, [router])
+
+      const handleSearch = useCallback((query: string) => {
+        // Simple local search implementation
+        return sessions.filter(session => 
+          session.id.toLowerCase().includes(query.toLowerCase()) ||
+          session.emotion?.toLowerCase().includes(query.toLowerCase()) ||
+          session.created_at.includes(query)
+        )
+      }, [sessions])
+
+  useEffect(() => {
+    mountedRef.current = true
+      loadSessions()
+
+    return () => {
+      mountedRef.current = false
+    }
+    }, [loadSessions])
+
+  // Redirect to auth if user becomes unauthenticated
+  useEffect(() => {
+    if (!authLoading && !user && mountedRef.current) {
+      // Clear any active session state
+      setActiveSession(null)
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("activeSessionId")
+      }
+      router.push("/auth")
+    }
+  }, [authLoading, user, setActiveSession, router])
+
+  // Note: useApiChat automatically handles connection based on activeSessionId
+  // No manual connect/disconnect needed
+
+  // Cleanup is handled automatically by useApiChat hook
 
   return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-background via-background to-secondary/20">
+    <div className="h-screen flex flex-col bg-gradient-to-br from-background via-background to-secondary/20 overflow-hidden">
       {/* Demo Banner */}
       {apiClient.isDemoMode() && (
         <div className="px-4 pt-4">
@@ -168,7 +183,7 @@ export function AppShell() {
 
             {/* Center: Connection Status */}
             <div className="hidden md:block">
-              <ConnectionStatus status={connectionStatus} />
+            <ConnectionStatus status={apiStatus} />
             </div>
 
             {/* Right: User Menu */}
@@ -221,7 +236,7 @@ export function AppShell() {
 
           {/* Mobile Connection Status */}
           <div className="md:hidden mt-2 flex justify-center">
-            <ConnectionStatus status={connectionStatus} />
+          <ConnectionStatus status={apiStatus} />
           </div>
         </div>
       </motion.header>
@@ -230,7 +245,7 @@ export function AppShell() {
       <div className="flex-1 flex overflow-hidden">
         {/* Left Sidebar */}
         <AnimatePresence>
-          {(sidebarOpen || window.innerWidth >= 1024) && (
+          {(sidebarOpen || (typeof window !== "undefined" && window.innerWidth >= 1024)) && (
             <motion.aside
               initial={{ x: -320, opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
@@ -251,7 +266,7 @@ export function AppShell() {
                 onSessionSelect={handleSessionSelect}
                 onNewSession={handleNewSession}
                 onLoadMore={loadMoreSessions}
-                onSearch={searchSessions}
+                  onSearch={handleSearch}
               />
             </motion.aside>
           )}
@@ -275,15 +290,15 @@ export function AppShell() {
           <div className="flex-1 flex flex-col">
             <ChatArea
               messages={messages}
-              isTyping={isTyping}
-              streamingState={streamingState}
+              isTyping={isSending}
               onSendMessage={sendMessage}
-              connectionStatus={connectionStatus}
-              error={chatError}
+              error={null}
               activeSession={getActiveSession()}
-              onLoadOlder={loadOlderMessages}
-              hasMoreHistory={hasMoreHistory}
-              historyLoading={historyLoading}
+                onLoadOlder={() => loadMoreMessages()}
+              hasMoreHistory={hasMoreMessages}
+              historyLoading={messagesLoading}
+              messagesLoading={messagesLoading}
+              messagesInitialized={!messagesLoading && messages.length >= 0}
             />
           </div>
 
@@ -314,7 +329,11 @@ export function AppShell() {
 
               <div className="flex-1 overflow-hidden">
                 <TabsContent value="summary" className="h-full m-0">
-                  <SessionSummary sessionId={activeSessionId} />
+                  <SessionSummary 
+                    sessionId={activeSessionId} 
+                    messagesInitialized={!messagesLoading && messages.length >= 0}
+                    delayMs={1500}
+                  />
                 </TabsContent>
                 <TabsContent value="preferences" className="h-full m-0">
                   <UserPreferences />

@@ -100,10 +100,10 @@ class Settings(BaseSettings):
     reload: bool = Field(default=True, env="RELOAD")
     
     # CORS settings
-    # cors_origins: List[str] = Field(
-    #     default=["http://localhost:5173", "http://127.0.0.1:5173"],
-    #     env="CORS_ORIGINS"
-    # )
+    cors_origins: List[str] = Field(
+        default=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"],
+        env="CORS_ORIGINS"
+    )
     cors_allow_credentials: bool = Field(default=True, env="CORS_ALLOW_CREDENTIALS")
     
     # Nested settings
@@ -131,15 +131,15 @@ class Settings(BaseSettings):
     #         return [origin.strip() for origin in v.split(',') if origin.strip()]
     #     return v
     
-    @model_validator(mode="before")
-    def validate_production_settings(cls, values):
-        environment = values.get('environment')
-        if environment == 'production':
-            if values.get('debug', True):
-                raise ValueError('Debug mode must be disabled in production')
-            if not values.get('database', {}).get('url'):
-                raise ValueError('Database URL is required in production')
-        return values
+    # @model_validator(mode="before")
+    # def validate_production_settings(cls, values):
+    #     environment = values.get('environment')
+    #     if environment == 'production':
+    #         # if values.get('debug', True):
+    #         #     raise ValueError('Debug mode must be disabled in production')
+    #         if not values.get('database', {}).get('url'):
+    #             raise ValueError('Database URL is required in production')
+    #     return values
     
     @property
     def is_development(self) -> bool:

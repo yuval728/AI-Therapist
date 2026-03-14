@@ -14,6 +14,7 @@ export default function AuthPage() {
   }
 
   const handleSuccess = () => {
+    // Navigate to chat page after successful authentication
     router.push("/chat")
   }
 

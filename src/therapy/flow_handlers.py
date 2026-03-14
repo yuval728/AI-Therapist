@@ -1,5 +1,5 @@
 """Enhanced flow handlers with improved error handling and monitoring."""
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from langchain_core.messages import HumanMessage, AIMessage
 from src.therapy.memory.memory_manager import (
     get_memory_manager,
@@ -7,8 +7,10 @@ from src.therapy.memory.memory_manager import (
     save_to_long_term_memory,
 )
 from src.config.constants import ResponseMessages, ClassificationResults, SystemPrompts
-from src.models import AttackType, EmotionType, CrisisLevel, MessageType, ClassificationFormat
-from src.core import moderate_input, moderate_output, detect_pii_enhanced, chat_completion, classify_text
+from src.models import AttackType, EmotionType, CrisisLevel, ClassificationFormat
+from src.therapy.guardrails.input_moderation import moderate_input, moderate_output
+from src.therapy.guardrails.pii_detection import detect_pii_enhanced
+from src.therapy.llm_utils import classify_text
 from src.utils import log_therapy_event, timing_decorator
 import json
 
@@ -219,7 +221,33 @@ class ClassificationHandler:
                 session_id=session_id,
                 classification_result=result
             )
-            result = json.loads(result)
+            
+            # Parse JSON result with error handling
+            try:
+                if not result or not result.strip():
+                    raise ValueError("Empty classification result")
+                
+                # Extract JSON from markdown formatting if present
+                if "```json" in result:
+                    start = result.find('{')
+                    end = result.rfind('}') + 1
+                    if start != -1 and end > start:
+                        json_str = result[start:end]
+                    else:
+                        raise ValueError("Could not extract JSON from markdown")
+                else:
+                    json_str = result.strip()
+                
+                result = json.loads(json_str)
+            except (json.JSONDecodeError, ValueError) as e:
+                log_therapy_event(
+                    event="classification_failed_json",
+                    user_id=user_id,
+                    session_id=session_id,
+                    error=str(e)
+                )
+                # Use default fallback values
+                return {**state, "mode": ClassificationResults.CHAT, "crisis_level": "none", "emotion": "neutral"}
             
             try:
                 mode = ClassificationResults.CHAT if result['mode'] == 'chat' else ClassificationResults.JOURNAL

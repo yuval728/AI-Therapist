@@ -1,6 +1,6 @@
 """Authentication and user management models."""
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional
 from pydantic import BaseModel, EmailStr, Field, validator
 from .base import BaseEntity
 from .enums import UserRole
@@ -97,9 +97,5 @@ class PasswordResetConfirm(BaseModel):
 
 class UserPreferences(BaseModel):
     """User preferences and settings."""
-    theme: str = Field(default="light", pattern=r'^(light|dark|auto)$')
-    language: str = Field(default="en", pattern=r'^[a-z]{2}$')
-    timezone: str = Field(default="UTC")
-    notifications_enabled: bool = Field(default=True)
-    crisis_alerts_enabled: bool = Field(default=True)
-    data_retention_days: int = Field(default=365, ge=30, le=3650)
+    theme: str = Field(default="light", pattern=r'^(light|dark|system)$')
+    language: str = Field(default="en", pattern=r'^(en|es|fr|de)$')

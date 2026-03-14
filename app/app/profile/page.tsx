@@ -7,7 +7,8 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { RouteGuard } from "@/components/route-guard"
-import { apiClient, type User } from "@/lib/api"
+import { apiClient } from "@/lib/api"
+import type { User } from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
 import { ArrowLeft, Save, Trash2, UserIcon, Calendar, Loader2 } from "lucide-react"
 import { motion } from "framer-motion"
@@ -130,8 +131,8 @@ export default function ProfilePage() {
 
   return (
     <RouteGuard requireAuth={true}>
-      <div className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/20 p-4">
-        <div className="max-w-2xl mx-auto">
+      <div className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/20 p-4 overflow-y-auto custom-scrollbar">
+        <div className="max-w-2xl mx-auto pb-8">
           {/* Header */}
           <motion.div
             initial={{ opacity: 0, y: -20 }}

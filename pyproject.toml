@@ -20,6 +20,9 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "langchain-huggingface>=0.1.2",
     "asyncpg>=0.30.0",
+    "redis>=6.4.0",
+    "psutil>=7.0.0",
+    "bleach>=6.2.0",
 ]
 
 [project.optional-dependencies]

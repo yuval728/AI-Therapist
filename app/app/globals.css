@@ -123,6 +123,8 @@
     @apply bg-background text-foreground;
     /* Added backdrop blur for glassmorphism support */
     backdrop-filter: blur(10px);
+    /* Allow page-level scrolling with custom scrollbar */
+    overflow-y: auto;
   }
 
   /* Added glassmorphism utility classes */
@@ -132,5 +134,83 @@
 
   .glass-strong {
     @apply bg-card/90 backdrop-blur-lg border border-border/30;
+  }
+
+  /* Custom scrollbar styles - Enhanced for better visibility and interaction */
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(156, 163, 175, 0.7) rgba(243, 244, 246, 0.2);
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: rgba(156, 163, 175, 0.15);
+    border-radius: 8px;
+    margin: 4px 0;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(156, 163, 175, 0.6);
+    border-radius: 8px;
+    transition: all 0.2s ease;
+    border: 2px solid transparent;
+    background-clip: content-box;
+    min-height: 20px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(156, 163, 175, 0.8);
+    background-clip: content-box;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:active {
+    background: rgba(156, 163, 175, 1);
+    background-clip: content-box;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* Dark mode scrollbar */
+  .dark .custom-scrollbar {
+    scrollbar-color: rgba(255, 255, 255, 0.5) rgba(0, 0, 0, 0.2);
+  }
+
+  .dark .custom-scrollbar::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.4);
+  }
+
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.6);
+  }
+
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb:active {
+    background: rgba(255, 255, 255, 0.8);
+  }
+
+  /* Scroll performance improvements */
+  .scroll-container {
+    contain: layout style paint;
+    will-change: scroll-position;
+  }
+
+  /* Smooth scroll behavior for better UX */
+  .scroll-smooth {
+    scroll-behavior: smooth;
+  }
+
+  /* Enhanced focus states for accessibility */
+  .scroll-to-bottom-btn:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
 }

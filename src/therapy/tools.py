@@ -1,19 +1,11 @@
 """Consolidated therapy tools for analysis and processing."""
-from pydantic import BaseModel
 import json
 from src.config import get_settings
-from src.core.llm_utils import get_completion
-from src.models.enums import EmotionType, CrisisLevel, MessageType
+from src.therapy.llm_utils import get_completion
+from src.models.enums import EmotionType, CrisisLevel
+from src.models.therapy_models import CrisisAnalyzer, EmotionAnalyzer
 
 settings = get_settings()
-
-
-class CrisisAnalyzer(BaseModel):
-    crisis: CrisisLevel
-
-
-class EmotionAnalyzer(BaseModel):
-    emotion: EmotionType
 
 
 async def crisis_tool(text: str) -> CrisisLevel:
@@ -88,9 +80,3 @@ async def journal_tool(entry: str) -> str:
     )
     response = response["choices"][0]["message"]["content"]
     return response
-
-
-if __name__ == "__main__":
-    import asyncio
-    print(asyncio.run(emotion_tool("I'm feeling sad.")))
-    print(asyncio.run(crisis_tool("I'm feeling sad.")))

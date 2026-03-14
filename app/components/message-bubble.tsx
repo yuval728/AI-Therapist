@@ -3,14 +3,12 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Brain, User } from "lucide-react"
 import { cn, formatTimestamp } from "@/lib/utils"
 import { motion } from "framer-motion"
-import { StreamingText } from "./streaming-text"
 
 interface MessageBubbleProps {
   message: string
   sender: "user" | "therapist"
   timestamp: string
   isTyping?: boolean
-  isStreaming?: boolean
   index?: number
 }
 
@@ -19,7 +17,6 @@ export function MessageBubble({
   sender,
   timestamp,
   isTyping = false,
-  isStreaming = false,
   index = 0,
 }: MessageBubbleProps) {
   const isTherapist = sender === "therapist"
@@ -83,11 +80,6 @@ export function MessageBubble({
               </div>
               <span className="text-xs text-muted-foreground ml-2">AI is thinking...</span>
             </div>
-          ) : isStreaming ? (
-            <StreamingText
-              content={message}
-              isStreaming={true}
-            />
           ) : (
             <motion.p
               initial={{ opacity: 0 }}

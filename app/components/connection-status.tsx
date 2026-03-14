@@ -2,40 +2,40 @@
 
 import { motion } from "framer-motion"
 import { Wifi, WifiOff, Loader2 } from "lucide-react"
-import type { ConnectionStatusType } from "@/lib/websocket-client"
+
+type ApiStatusType = "healthy" | "checking" | "error" | "offline"
 
 interface ConnectionStatusProps {
-  status: ConnectionStatusType
+  status: ApiStatusType
   className?: string
 }
 
 export function ConnectionStatus({ status, className = "" }: ConnectionStatusProps) {
   const getStatusConfig = () => {
     switch (status) {
-      case "connected":
+      case "healthy":
         return {
           icon: Wifi,
           text: "Connected",
           color: "text-green-500",
           bgColor: "bg-green-500/10",
         }
-      case "connecting":
+      case "checking":
         return {
           icon: Loader2,
-          text: "Connecting...",
+          text: "Checking...",
           color: "text-yellow-500",
           bgColor: "bg-yellow-500/10",
           animate: true,
         }
-      case "reconnecting":
+      case "error":
         return {
-          icon: Loader2,
-          text: "Reconnecting...",
+          icon: WifiOff,
+          text: "Error",
           color: "text-orange-500",
           bgColor: "bg-orange-500/10",
-          animate: true,
         }
-      case "disconnected":
+      case "offline":
         return {
           icon: WifiOff,
           text: "Disconnected",

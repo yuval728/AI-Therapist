@@ -1,11 +1,4 @@
 """Utilities package for the AI therapist application."""
-from .response_formatter import (
-    format_streaming_response,
-    create_error_response,
-    create_delta_response,
-    create_end_response,
-    create_websocket_response
-)
 from .error_handling import (
     TherapyError,
     AuthenticationError,
@@ -38,18 +31,18 @@ from .decorators import (
     retry_decorator,
     validate_input_decorator,
     security_monitor_decorator,
-    AsyncContextManager,
+    # AsyncContextManager,
     cache_decorator
+)
+from .cache_manager import (
+    get_cache_manager,
+    cache_get,
+    cache_set,
+    cache_delete,
+    cached
 )
 
 __all__ = [
-    # Response formatting
-    "format_streaming_response",
-    "create_error_response", 
-    "create_delta_response",
-    "create_end_response",
-    "create_websocket_response",
-    
     # Error handling
     "TherapyError",
     "AuthenticationError",
@@ -84,5 +77,12 @@ __all__ = [
     "security_monitor_decorator",
     "AsyncContextManager",
     "cache_decorator",
+    
+    # Cache management
+    "get_cache_manager",
+    "cache_get",
+    "cache_set", 
+    "cache_delete",
+    "cached",
     
 ]

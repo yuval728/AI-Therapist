@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { WebSocketClient, type WebSocketMessage, type ConnectionStatus } from "@/lib/websocket-client"
 import { apiClient } from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
+import { handleWebSocketError } from "@/lib/error-handler"
+import { useInfiniteMessages } from "@/hooks/use-infinite-messages"
 
 interface ChatMessage {
   id: string
@@ -13,7 +15,7 @@ interface ChatMessage {
   emotion?: string
   crisis_level?: number
   mode?: string
-  metadata?: Record<string, any>
+  metadata?: Record<string, unknown>
 }
 
 interface StreamingState {
@@ -23,7 +25,7 @@ interface StreamingState {
     emotion?: string
     crisis_level?: number
     mode?: string
-    metadata?: Record<string, any>
+    metadata?: Record<string, unknown>
   }
 }
 
@@ -36,7 +38,6 @@ const createChatMessage = (role: "user" | "assistant", content: string, extra?: 
 })
 
 export function useWebSocketChat(sessionId?: string) {
-  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected")
   const [isTyping, setIsTyping] = useState(false)
   const [streamingState, setStreamingState] = useState<StreamingState>({
@@ -44,22 +45,27 @@ export function useWebSocketChat(sessionId?: string) {
     isStreaming: false,
   })
   const [error, setError] = useState<string | null>(null)
-  const [historyLoading, setHistoryLoading] = useState(false)
-  const [pageSize] = useState(20)
-  const [totalMessages, setTotalMessages] = useState<number>(0)
-  const [offset, setOffset] = useState<number>(0) // current window start offset (for ascending order)
 
   const wsClient = useRef<WebSocketClient | null>(null)
   const connectingRef = useRef(false)
+  const mountedRef = useRef(true)
+  const currentSessionRef = useRef<string | undefined>(sessionId)
   const { toast } = useToast()
+
+  // Use infinite messages hook for message management
+  const infiniteMessages = useInfiniteMessages(sessionId)
+
+  // Update session ref when sessionId changes
+  useEffect(() => {
+    currentSessionRef.current = sessionId
+  }, [sessionId])
 
   const handleWebSocketMessage = useCallback(
     (message: WebSocketMessage) => {
-      console.log("[v0] Processing WebSocket message:", message.type)
+      if (!mountedRef.current) return
 
       switch (message.type) {
         case "connected":
-          console.log("[v0] WebSocket connected with session:", message.session_id)
           setError(null)
           break
 
@@ -83,14 +89,16 @@ export function useWebSocketChat(sessionId?: string) {
               id: `msg-${Date.now()}`,
               role: "assistant",
               content: message.content,
-              timestamp: message.timestamp,
+              timestamp: message.timestamp || new Date().toISOString(),
               emotion: message.emotion,
               crisis_level: message.crisis_level,
               mode: message.mode,
               metadata: message.metadata,
             }
 
-            setMessages((prev) => [...prev, assistantMessage])
+            // Add message to infinite messages
+            infiniteMessages.addMessage(assistantMessage)
+            
             setStreamingState({
               content: "",
               isStreaming: false,
@@ -105,15 +113,33 @@ export function useWebSocketChat(sessionId?: string) {
           break
 
         case "error":
-          console.error("[v0] WebSocket error:", message.error)
           setError(message.error || "Unknown error")
           setIsTyping(false)
           setStreamingState({ content: "", isStreaming: false })
+
+          const wsError = new Error(message.error || "WebSocket error")
+          handleWebSocketError(wsError, {
+            component: "useWebSocketChat",
+            action: "message_error",
+            sessionId: currentSessionRef.current,
+          })
 
           if (message.error_code === "RATE_LIMIT_EXCEEDED") {
             toast({
               title: "Rate limit exceeded",
               description: "Please wait a moment before sending another message.",
+              variant: "destructive",
+            })
+          } else if (message.error_code === "SESSION_EXPIRED") {
+            toast({
+              title: "Session expired",
+              description: "Please refresh the page to continue.",
+              variant: "destructive",
+            })
+          } else {
+            toast({
+              title: "Connection Error",
+              description: "There was a problem with the chat connection.",
               variant: "destructive",
             })
           }
@@ -124,41 +150,11 @@ export function useWebSocketChat(sessionId?: string) {
           break
       }
     },
-    [toast],
+    [toast, infiniteMessages],
   )
 
-  // Load older messages (prepend)
-  const loadOlderMessages = useCallback(async () => {
-    if (!sessionId) return
-    if (historyLoading) return
-    if (offset <= 0) return
-    try {
-      setHistoryLoading(true)
-      const prevOffset = Math.max(0, offset - pageSize)
-      const pageLimit = offset - prevOffset || pageSize
-      const page = await apiClient.getSessionMessagesPaged(sessionId, prevOffset, pageLimit)
-      const older = page.messages.map((m) => ({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        timestamp: m.created_at,
-        emotion: m.emotion,
-        crisis_level: m.crisis_level,
-        mode: m.mode,
-        metadata: m.metadata,
-      }))
-      setMessages((prev) => [...older, ...prev])
-      setOffset(prevOffset)
-      setTotalMessages(page.total)
-    } catch (err) {
-      console.error("[v0] failed to load older messages:", err)
-      setError(err instanceof Error ? err.message : "Failed to load older messages")
-    } finally {
-      setHistoryLoading(false)
-    }
-  }, [sessionId, historyLoading, offset, pageSize])
-
   const handleConnectionChange = useCallback((status: ConnectionStatus) => {
+    if (!mountedRef.current) return
     setConnectionStatus(status)
     if (status === "connected") {
       setError(null)
@@ -167,7 +163,15 @@ export function useWebSocketChat(sessionId?: string) {
 
   const handleError = useCallback(
     (error: string) => {
+      if (!mountedRef.current) return
       setError(error)
+
+      handleWebSocketError(new Error(error), {
+        component: "useWebSocketChat",
+        action: "connection_error",
+        sessionId: currentSessionRef.current,
+      })
+
       toast({
         title: "Connection Error",
         description: error,
@@ -180,11 +184,9 @@ export function useWebSocketChat(sessionId?: string) {
   const connect = useCallback(async () => {
     try {
       if (connectingRef.current) {
-        // Avoid parallel connects
         return
       }
 
-      // Skip if already connected or connecting
       const status = wsClient.current?.getConnectionStatus()
       if (status === "connected" || status === "connecting") {
         return
@@ -206,77 +208,26 @@ export function useWebSocketChat(sessionId?: string) {
         onError: handleError,
       })
 
-      await wsClient.current.connect(accessToken, sessionId)
+      await wsClient.current.connect(accessToken, currentSessionRef.current)
       connectingRef.current = false
     } catch (error) {
-      console.error("[v0] Failed to connect WebSocket:", error)
-      setError(error instanceof Error ? error.message : "Connection failed")
+      const errorMessage = error instanceof Error ? error.message : "Connection failed"
+      setError(errorMessage)
       connectingRef.current = false
-    }
-  }, [sessionId, handleWebSocketMessage, handleConnectionChange, handleError])
 
-  // Load initial history when session changes
-  useEffect(() => {
-    const loadInitial = async () => {
-      if (!sessionId) {
-        setMessages([])
-        setTotalMessages(0)
-        setOffset(0)
-        return
-      }
-      try {
-        setHistoryLoading(true)
-        // First page to discover total
-        const first = await apiClient.getSessionMessagesPaged(sessionId, 0, pageSize)
-        let startOffset = 0
-        if (first.total > pageSize) {
-          startOffset = first.total - pageSize
-          const lastPage = await apiClient.getSessionMessagesPaged(sessionId, startOffset, pageSize)
-          setMessages(
-            lastPage.messages.map((m) => ({
-              id: m.id,
-              role: m.role,
-              content: m.content,
-              timestamp: m.created_at,
-              emotion: m.emotion,
-              crisis_level: m.crisis_level,
-              mode: m.mode,
-              metadata: m.metadata,
-            })),
-          )
-          setTotalMessages(lastPage.total)
-          setOffset(startOffset)
-        } else {
-          setMessages(
-            first.messages.map((m) => ({
-              id: m.id,
-              role: m.role,
-              content: m.content,
-              timestamp: m.created_at,
-              emotion: m.emotion,
-              crisis_level: m.crisis_level,
-              mode: m.mode,
-              metadata: m.metadata,
-            })),
-          )
-          setTotalMessages(first.total)
-          setOffset(0)
-        }
-      } catch (err) {
-        console.error("[v0] failed to load initial history:", err)
-        setError(err instanceof Error ? err.message : "Failed to load history")
-      } finally {
-        setHistoryLoading(false)
+      if (error instanceof Error) {
+        handleWebSocketError(error, {
+          component: "useWebSocketChat",
+          action: "connect_failed",
+          sessionId: currentSessionRef.current,
+        })
       }
     }
-    loadInitial()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId])
+  }, [handleWebSocketMessage, handleConnectionChange, handleError])
 
   const sendMessage = useCallback(
     async (content: string) => {
       try {
-        // Connect on demand if needed
         if (!wsClient.current || connectionStatus !== "connected") {
           await connect()
         }
@@ -285,20 +236,18 @@ export function useWebSocketChat(sessionId?: string) {
           throw new Error("Unable to connect to chat service")
         }
 
-        // Add user message immediately
         const userMessage = createChatMessage("user", content)
 
-        setMessages((prev) => [...prev, userMessage])
+        // Add user message to infinite messages
+        infiniteMessages.addMessage(userMessage)
         setError(null)
 
-        // Send via WebSocket
         wsClient.current.sendChat(content)
       } catch (err) {
-        console.error("[v0] sendMessage failed:", err)
         setError(err instanceof Error ? err.message : "Failed to send message")
       }
     },
-    [connectionStatus, connect],
+    [connectionStatus, connect, infiniteMessages],
   )
 
   const disconnect = useCallback(() => {
@@ -311,29 +260,36 @@ export function useWebSocketChat(sessionId?: string) {
   }, [])
 
   const getSessionId = useCallback(() => {
-    return wsClient.current?.getSessionId() || sessionId
-  }, [sessionId])
+    return wsClient.current?.getSessionId() || currentSessionRef.current
+  }, [])
 
-  // Cleanup on unmount
   useEffect(() => {
+    mountedRef.current = true
     return () => {
-      disconnect()
+      mountedRef.current = false
+
+      if (wsClient.current) {
+        wsClient.current.disconnect()
+        wsClient.current = null
+      }
+      connectingRef.current = false
     }
-  }, [disconnect])
+  }, [])
 
   return {
-    messages,
+    messages: infiniteMessages.messages,
     connectionStatus,
     isTyping,
     streamingState,
-    error,
+    error: error || infiniteMessages.error,
     connect,
     sendMessage,
     disconnect,
     getSessionId,
-    // history
-    loadOlderMessages,
-    historyLoading,
-    hasMoreHistory: offset > 0,
+    loadOlderMessages: infiniteMessages.loadMoreMessages,
+    historyLoading: infiniteMessages.loadingMore,
+    hasMoreHistory: infiniteMessages.hasMore,
+    messagesLoading: infiniteMessages.loading,
+    messagesInitialized: infiniteMessages.initialized,
   }
 }

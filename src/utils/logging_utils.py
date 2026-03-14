@@ -1,11 +1,4 @@
-"""Enhanced logging utilities with clearer console output and structured file logs.
 
-Key improvements:
-- Concise, colorized console logs with key fields (time, level, event, cid, uid, sid)
-- Structured JSON logs to file for ingestion (serialize=True)
-- Correlation ID support using contextvars to trace flows across layers
-- Backtrace/diagnose toggles for deep debugging on demand
-"""
 import sys
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -13,7 +6,6 @@ from loguru import logger
 from datetime import datetime, timezone
 
 CONFIGURED = False
-
 
 def _ensure_extra_defaults(record):
     """Patcher to provide default extra fields for formatting safety."""
@@ -28,11 +20,7 @@ def configure_logging(
     log_dir: Optional[Union[str, Path]] = None,
     include_trace: bool = False,
 ) -> None:
-    """Configure application logging.
-
-    Console: human-friendly, non-JSON, colorized and concise.
-    File: structured JSON for ingestion/analysis.
-    """
+    """Configure optimized application logging."""
     global CONFIGURED
     if CONFIGURED:
         return
@@ -40,14 +28,13 @@ def configure_logging(
     # Remove default handler
     logger.remove()
 
-    # Console handler: concise and readable
     console_format = (
-        "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> "
-        "| <level>{level: <7}</level> "
+        "<green>{time:HH:mm:ss.SSS}</green> "
+        "| <level>{level: <4}</level> "
         "| <bold>{message}</bold> "
-        "| uid={extra[uid]} sid={extra[sid]}"
+        "| <cyan>u:{extra[uid]} s:{extra[sid]}</cyan>"
     )
-
+    
     logger.add(
         sys.stdout,
         format=console_format,
